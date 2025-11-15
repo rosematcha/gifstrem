@@ -46,10 +46,12 @@ const SubmissionPage = () => {
         fileSize: file.size,
       });
       console.info('[submission] FormData preview', {
-        entries: Array.from(formData.entries()).map(([key, value]) => ({
-          key,
-          valueType: typeof value,
-        })),
+        slugValue: formData.get('slug'),
+        uploaderNameValue: formData.get('uploaderName'),
+        messageValue: formData.get('message'),
+        fileNameValue: (formData.get('file') as File | null)?.name,
+        fileTypeValue: (formData.get('file') as File | null)?.type,
+        fileSizeValue: (formData.get('file') as File | null)?.size,
       });
       const response = await api.post('/submissions/public', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
