@@ -20,6 +20,9 @@
     "uploadthing": "7.7.4",
     "zod": "3.23.8"
   },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "4.53.2"
+  },
   "devDependencies": {
     "@biomejs/biome": "1.6.4",
     "@cloudflare/workers-types": "4.20241018.0",
