@@ -1,17 +1,34 @@
-import { FormEvent, useState } from 'react';
+import { ChangeEvent, FormEvent, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { compressGifToLimit } from '../lib/gifCompression';
 import type { Streamer } from '../types';
 import type { AxiosError } from 'axios';
+
+const MAX_GIF_SIZE_BYTES = 2 * 1024 * 1024;
+const MAX_COMPRESSIBLE_BYTES = 8 * 1024 * 1024;
+
+const formatBytes = (bytes: number) => {
+  const units = ['bytes', 'KB', 'MB'];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const decimals = unitIndex === 0 ? 0 : 1;
+  return `${value.toFixed(decimals)} ${units[unitIndex]}`;
+};
 
 const SubmissionPage = () => {
   const { slug } = useParams<{ slug: string }>();
   const [uploaderName, setUploaderName] = useState('');
   const [message, setMessage] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'compressing' | 'submitting' | 'success' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [compressionNotice, setCompressionNotice] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['streamer', slug],
@@ -22,6 +39,24 @@ const SubmissionPage = () => {
     enabled: Boolean(slug),
   });
 
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0] ?? null;
+    setFile(selectedFile);
+    setCompressionNotice(null);
+    if (!selectedFile) {
+      return;
+    }
+
+    if (selectedFile.size > MAX_COMPRESSIBLE_BYTES) {
+      setStatus('error');
+      setError('GIFs must be 8MB or smaller before upload.');
+      return;
+    }
+
+    setError(null);
+    setStatus('idle');
+  };
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!file || !slug) {
@@ -30,8 +65,47 @@ const SubmissionPage = () => {
       setError('Please select a GIF first');
       return;
     }
-    setStatus('submitting');
+
+    if (file.size > MAX_COMPRESSIBLE_BYTES) {
+      console.warn('[submission] File rejected before compression attempt', {
+        size: file.size,
+        maxCompressible: MAX_COMPRESSIBLE_BYTES,
+      });
+      setStatus('error');
+      setError('Upload GIFs up to 8MB. Larger exports need trimming before we can compress them.');
+      return;
+    }
+
     setError(null);
+    let fileToUpload: File = file;
+    if (file.size > MAX_GIF_SIZE_BYTES) {
+      console.info('[submission] File exceeds 2MB, attempting local compression', {
+        originalSize: file.size,
+      });
+      setStatus('compressing');
+      try {
+        const compression = await compressGifToLimit(file, MAX_GIF_SIZE_BYTES);
+        fileToUpload = compression.file;
+        setFile(fileToUpload);
+        setCompressionNotice(
+          `Compressed from ${formatBytes(compression.beforeBytes)} to ${formatBytes(compression.afterBytes)} before upload.`,
+        );
+        if (fileToUpload.size > MAX_GIF_SIZE_BYTES) {
+          setStatus('error');
+          setError('Even after compression the GIF is still above 2MB. Please trim frames or reduce dimensions.');
+          return;
+        }
+      } catch (compressionError) {
+        console.error('[submission] Compression failed', compressionError);
+        setStatus('error');
+        setError('We could not compress this GIF locally. Please export a smaller file.');
+        return;
+      }
+    } else {
+      setCompressionNotice(null);
+    }
+
+    setStatus('submitting');
     const formData = new FormData();
     console.debug('[submission] creating form data container');
     formData.append('slug', slug);
@@ -40,19 +114,20 @@ const SubmissionPage = () => {
     console.debug('[submission] appended uploaderName', uploaderName);
     formData.append('message', message);
     console.debug('[submission] appended message', message);
-    formData.append('file', file);
+    formData.append('file', fileToUpload);
     console.debug('[submission] appended file blob', {
-      name: file.name,
-      type: file.type,
-      size: file.size,
+      name: fileToUpload.name,
+      type: fileToUpload.type,
+      size: fileToUpload.size,
     });
     try {
       console.info('[submission] Uploading GIF', {
         slug,
         uploaderName,
         messageLength: message.length,
-        fileName: file.name,
-        fileSize: file.size,
+        fileName: fileToUpload.name,
+        fileSize: fileToUpload.size,
+        wasCompressed: fileToUpload !== file,
       });
       console.info('[submission] FormData preview', {
         slugValue: formData.get('slug'),
@@ -74,6 +149,7 @@ const SubmissionPage = () => {
       setUploaderName('');
       setMessage('');
       setFile(null);
+      setCompressionNotice(null);
     } catch (err) {
       const axiosError = err as AxiosError<{ error?: string; details?: unknown }>;
       const messageText = axiosError.response?.data?.error ?? axiosError.message;
@@ -133,17 +209,20 @@ const SubmissionPage = () => {
               type="file"
               accept="image/gif"
               className="mt-1 w-full rounded-btn border border-dashed border-slate bg-charcoal p-4 file:mr-4 file:rounded-btn file:border-0 file:bg-violet file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-softViolet"
-              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+              onChange={handleFileChange}
               required
             />
-            <span className="text-xs text-dimGray">Only animated GIFs for now. Max 15MB.</span>
+            <span className="text-xs text-dimGray">
+              Animated GIFs up to 2MB. We will try to compress files up to 8MB before upload.
+            </span>
+            {compressionNotice && <span className="mt-1 block text-xs text-emerald/80">{compressionNotice}</span>}
           </label>
           <button
             type="submit"
-            disabled={status === 'submitting'}
+            disabled={status === 'submitting' || status === 'compressing'}
             className="w-full rounded-btn bg-violet py-[10px] px-5 font-semibold text-white hover:bg-softViolet hover:-translate-y-[1px] active:bg-deepViolet active:translate-y-0 disabled:opacity-50"
           >
-            {status === 'submitting' ? 'Uploading...' : 'Submit GIF'}
+            {status === 'compressing' ? 'Compressing GIF...' : status === 'submitting' ? 'Uploading...' : 'Submit GIF'}
           </button>
         </form>
       </div>

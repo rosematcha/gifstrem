@@ -148,8 +148,8 @@ app.post('/api/submissions/public', async (c) => {
   if (file.type !== 'image/gif') {
     return c.json({ error: 'Only GIF uploads are supported right now.' }, 400);
   }
-  if (file.size > 15 * 1024 * 1024) {
-    return c.json({ error: 'GIF file exceeds the 15MB limit.' }, 400);
+  if (file.size > 2 * 1024 * 1024) {
+    return c.json({ error: 'GIF file exceeds the 2MB limit.' }, 400);
   }
   const repos = c.get('repos');
   const streamer = await repos.users.findBySlug(payload.data.slug);
