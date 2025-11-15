@@ -13,3 +13,4 @@ Thumbs.db
 .wrangler/
 *.md
 .dev.vars
+migrations/0002_slug_auth.sql

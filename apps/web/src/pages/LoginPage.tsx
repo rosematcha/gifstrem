@@ -6,7 +6,7 @@ import type { Streamer } from '../types';
 
 const LoginPage = () => {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ username: '', password: '' });
+  const [form, setForm] = useState({ slug: '', password: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,12 +42,13 @@ const LoginPage = () => {
         <h1 className="text-2xl font-semibold">Welcome back</h1>
         {error && <p className="rounded-btn bg-coral/20 border border-coral/40 p-2 text-sm text-white">{error}</p>}
         <label className="block text-sm font-semibold text-coolGray">
-          Username
+          Your slug
           <input
             type="text"
-            className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray focus:border-violet focus:outline-none"
-            value={form.username}
-            onChange={(event) => setForm((prev) => ({ ...prev, username: event.target.value }))}
+            className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray lowercase focus:border-violet focus:outline-none"
+            placeholder="cinappses"
+            value={form.slug}
+            onChange={(event) => setForm((prev) => ({ ...prev, slug: event.target.value.toLowerCase() }))}
             required
           />
         </label>

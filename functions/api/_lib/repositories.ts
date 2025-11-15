@@ -80,6 +80,16 @@ export function createRepositories(env: GifstremBindings) {
           .bind(JSON.stringify(settings), new Date().toISOString(), userId)
           .run();
       },
+      async updateProfile(userId: string, displayName: string, slug: string): Promise<void> {
+        await env.DB.prepare('UPDATE users SET display_name = ?, slug = ?, updated_at = ? WHERE id = ?')
+          .bind(displayName, slug, new Date().toISOString(), userId)
+          .run();
+      },
+      async updatePassword(userId: string, passwordHash: string): Promise<void> {
+        await env.DB.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?')
+          .bind(passwordHash, new Date().toISOString(), userId)
+          .run();
+      },
       async findById(id: string): Promise<UserRow | undefined> {
         const record = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first<UserRow>();
         return record ?? undefined;

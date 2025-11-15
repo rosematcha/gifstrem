@@ -5,6 +5,7 @@ import LoginPage from './LoginPage';
 import SignupPage from './SignupPage';
 import DashboardPage from './DashboardPage';
 import OverlayPage from './OverlayPage';
+import AccountSettingsPage from './AccountSettingsPage';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 
 const App = () => {
@@ -18,6 +19,14 @@ const App = () => {
         element={
           <ProtectedRoute>
             <DashboardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <ProtectedRoute>
+            <AccountSettingsPage />
           </ProtectedRoute>
         }
       />

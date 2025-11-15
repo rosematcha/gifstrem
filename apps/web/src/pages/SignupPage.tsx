@@ -7,10 +7,9 @@ import type { Streamer } from '../types';
 const SignupPage = () => {
   const navigate = useNavigate();
   const [form, setForm] = useState({
-    username: '',
-    password: '',
     displayName: '',
     slug: '',
+    password: '',
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,27 +47,18 @@ const SignupPage = () => {
         <h1 className="text-2xl font-semibold">Create streamer account</h1>
         {error && <p className="rounded-btn bg-coral/20 border border-coral/40 p-2 text-sm text-white">{error}</p>}
         <label className="block text-sm font-semibold text-coolGray">
-          Username
+          Your name
           <input
             type="text"
             className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray focus:border-violet focus:outline-none"
-            value={form.username}
-            onChange={(event) => setForm((prev) => ({ ...prev, username: event.target.value }))}
-            required
-          />
-        </label>
-        <label className="block text-sm font-semibold text-coolGray">
-          Display name
-          <input
-            type="text"
-            className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray focus:border-violet focus:outline-none"
+            placeholder="e.g., Cinappses"
             value={form.displayName}
             onChange={(event) => setForm((prev) => ({ ...prev, displayName: event.target.value }))}
             required
           />
         </label>
         <label className="block text-sm font-semibold text-coolGray">
-          Vanity slug (used in your submission link)
+          URL slug (used in your submission link)
           <input
             type="text"
             className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray lowercase focus:border-violet focus:outline-none"
@@ -77,6 +67,15 @@ const SignupPage = () => {
             onChange={(event) => setForm((prev) => ({ ...prev, slug: event.target.value.toLowerCase() }))}
             required
           />
+          <div className="mt-2 rounded-btn bg-charcoal border border-slate/30 p-2">
+            <p className="text-xs text-dimGray mb-1">Your submission link will be:</p>
+            <p className="text-sm font-mono text-violet">
+              gifstrem.com/{form.slug || 'your-slug'}
+            </p>
+          </div>
+          <span className="text-xs text-dimGray mt-1 block">
+            You'll use this slug to login and share with viewers
+          </span>
         </label>
         <label className="block text-sm font-semibold text-coolGray">
           Password

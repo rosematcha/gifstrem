@@ -24,14 +24,13 @@ app.use('*', async (c, next) => {
 });
 
 const signupSchema = z.object({
-  username: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_]+$/, 'Only letters, numbers, underscores'),
-  password: z.string().min(8).max(128),
   displayName: z.string().min(2).max(64),
   slug: z.string().min(3).max(40).regex(/^[a-z0-9-]+$/, 'Lowercase letters, numbers, hyphen'),
+  password: z.string().min(8).max(128),
 });
 
 const loginSchema = z.object({
-  username: z.string(),
+  slug: z.string(),
   password: z.string(),
 });
 
@@ -66,15 +65,12 @@ app.post('/api/auth/signup', async (c) => {
     return c.json({ error: 'Invalid payload', details: parsed.error.format() }, 400);
   }
   const repos = c.get('repos');
-  const { username, password, displayName, slug } = parsed.data;
-  if (await repos.users.findByUsername(username)) {
-    return c.json({ error: 'Username already taken' }, 409);
-  }
+  const { displayName, slug, password } = parsed.data;
   if (await repos.users.findBySlug(slug)) {
     return c.json({ error: 'Slug already in use' }, 409);
   }
   const user = await repos.users.create({
-    username,
+    username: slug, // Use slug as username for backward compatibility
     passwordHash: await hashPassword(password),
     displayName,
     slug,
@@ -90,7 +86,7 @@ app.post('/api/auth/login', async (c) => {
     return c.json({ error: 'Invalid payload' }, 400);
   }
   const repos = c.get('repos');
-  const existing = await repos.users.findByUsername(parsed.data.username);
+  const existing = await repos.users.findBySlug(parsed.data.slug);
   if (!existing) {
     return c.json({ error: 'Invalid credentials' }, 401);
   }
@@ -303,6 +299,57 @@ app.put('/api/settings/resolution', requireAuth, async (c) => {
   await c.get('repos').users.updateSettings(user.id, settings);
   const updated = await c.get('repos').users.findById(user.id);
   return c.json({ user: serializeUser(updated!) });
+});
+
+app.put('/api/settings/profile', requireAuth, async (c) => {
+  const result = z
+    .object({
+      displayName: z.string().min(2).max(64),
+      slug: z.string().min(3).max(40).regex(/^[a-z0-9-]+$/, 'Lowercase letters, numbers, hyphen'),
+    })
+    .safeParse(await c.req.json());
+  if (!result.success) {
+    return c.json({ error: 'Invalid payload', details: result.error.format() }, 400);
+  }
+  const user = c.get('user')!;
+  const repos = c.get('repos');
+  
+  // Check if slug is being changed and if new slug is available
+  if (result.data.slug !== user.slug) {
+    const existing = await repos.users.findBySlug(result.data.slug);
+    if (existing && existing.id !== user.id) {
+      return c.json({ error: 'Slug already in use' }, 409);
+    }
+  }
+  
+  await repos.users.updateProfile(user.id, result.data.displayName, result.data.slug);
+  const updated = await repos.users.findById(user.id);
+  return c.json({ user: serializeUser(updated!) });
+});
+
+app.put('/api/settings/password', requireAuth, async (c) => {
+  const result = z
+    .object({
+      currentPassword: z.string(),
+      newPassword: z.string().min(8).max(128),
+    })
+    .safeParse(await c.req.json());
+  if (!result.success) {
+    return c.json({ error: 'Invalid payload' }, 400);
+  }
+  const user = c.get('user')!;
+  
+  // Verify current password
+  const valid = await verifyPassword(user.password_hash, result.data.currentPassword);
+  if (!valid) {
+    return c.json({ error: 'Current password is incorrect' }, 401);
+  }
+  
+  // Update password
+  const newHash = await hashPassword(result.data.newPassword);
+  await c.get('repos').users.updatePassword(user.id, newHash);
+  
+  return c.json({ success: true });
 });
 
 app.onError((err, c) => {
