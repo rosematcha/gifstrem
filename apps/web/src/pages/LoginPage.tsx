@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getToken, setToken } from '../lib/auth';
+import { sanitizeSlug, sanitizeText, validateInput } from '../lib/sanitize';
 import type { Streamer } from '../types';
 
 const LoginPage = () => {
@@ -48,7 +49,18 @@ const LoginPage = () => {
             className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray lowercase focus:border-violet focus:outline-none"
             placeholder="cinappses"
             value={form.slug}
-            onChange={(event) => setForm((prev) => ({ ...prev, slug: event.target.value.toLowerCase() }))}
+            onChange={(event) => {
+              const sanitized = sanitizeSlug(event.target.value.toLowerCase());
+              if (validateInput(sanitized)) {
+                setForm((prev) => ({ ...prev, slug: sanitized }));
+              }
+            }}
+            onBlur={() => {
+              const sanitized = sanitizeSlug(form.slug);
+              if (sanitized !== form.slug) {
+                setForm((prev) => ({ ...prev, slug: sanitized }));
+              }
+            }}
             required
           />
         </label>
@@ -58,7 +70,12 @@ const LoginPage = () => {
             type="password"
             className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray focus:border-violet focus:outline-none"
             value={form.password}
-            onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
+            onChange={(event) => {
+              const sanitized = sanitizeText(event.target.value);
+              if (validateInput(sanitized)) {
+                setForm((prev) => ({ ...prev, password: sanitized }));
+              }
+            }}
             required
           />
         </label>

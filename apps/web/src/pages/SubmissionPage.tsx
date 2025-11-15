@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { compressGifToLimit } from '../lib/gifCompression';
+import { sanitizeDisplayName, sanitizeMessage, validateInput } from '../lib/sanitize';
 import type { Streamer } from '../types';
 import type { AxiosError } from 'axios';
 
@@ -188,7 +189,18 @@ const SubmissionPage = () => {
             <input
               type="text"
               value={uploaderName}
-              onChange={(event) => setUploaderName(event.target.value)}
+              onChange={(event) => {
+                const sanitized = sanitizeDisplayName(event.target.value);
+                if (validateInput(sanitized)) {
+                  setUploaderName(sanitized);
+                }
+              }}
+              onBlur={() => {
+                const sanitized = sanitizeDisplayName(uploaderName);
+                if (sanitized !== uploaderName) {
+                  setUploaderName(sanitized);
+                }
+              }}
               className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray focus:border-violet focus:outline-none"
               required
             />
@@ -198,7 +210,18 @@ const SubmissionPage = () => {
             <textarea
               value={message}
               maxLength={240}
-              onChange={(event) => setMessage(event.target.value)}
+              onChange={(event) => {
+                const sanitized = sanitizeMessage(event.target.value);
+                if (validateInput(sanitized)) {
+                  setMessage(sanitized);
+                }
+              }}
+              onBlur={() => {
+                const sanitized = sanitizeMessage(message);
+                if (sanitized !== message) {
+                  setMessage(sanitized);
+                }
+              }}
               className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray focus:border-violet focus:outline-none"
               rows={3}
             />

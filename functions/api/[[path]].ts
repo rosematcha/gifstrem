@@ -8,6 +8,7 @@ import { serializeSubmission, serializeUser } from './_lib/serializers';
 import { createOverlayToken, generateAccessToken, hashPassword, verifyAccessToken, verifyPassword } from './_lib/security';
 import type { GifstremBindings, SettingsShape, UserRow } from './_lib/types';
 import { saveGifToR2, deleteGifFromR2 } from './_lib/storage';
+import { sanitizeDisplayName, sanitizeSlug, sanitizeMessage, sanitizeText, validateNoSqlInjection } from './_lib/sanitize';
 
 type AppBindings = GifstremBindings;
 type AppVariables = {
@@ -24,14 +25,14 @@ app.use('*', async (c, next) => {
 });
 
 const signupSchema = z.object({
-  displayName: z.string().min(2).max(64),
-  slug: z.string().min(3).max(40).regex(/^[a-z0-9-]+$/, 'Lowercase letters, numbers, hyphen'),
-  password: z.string().min(8).max(128),
+  displayName: z.string().min(2).max(64).transform(sanitizeDisplayName).refine(val => val.length >= 2, 'Display name too short after sanitization'),
+  slug: z.string().min(3).max(40).transform(sanitizeSlug).regex(/^[a-z0-9-]+$/, 'Lowercase letters, numbers, hyphen').refine(val => val.length >= 3, 'Slug too short after sanitization'),
+  password: z.string().min(8).max(128).transform(sanitizeText).refine(val => validateNoSqlInjection(val), 'Invalid password format'),
 });
 
 const loginSchema = z.object({
-  slug: z.string(),
-  password: z.string(),
+  slug: z.string().transform(sanitizeSlug),
+  password: z.string().transform(sanitizeText),
 });
 
 const safeZoneSchema = z.object({
@@ -50,9 +51,9 @@ const safeZoneSchema = z.object({
 });
 
 const submissionSchema = z.object({
-  slug: z.string().min(3),
-  uploaderName: z.string().min(1).max(64),
-  message: z.string().max(240).optional(),
+  slug: z.string().min(3).transform(sanitizeSlug),
+  uploaderName: z.string().min(1).max(64).transform(sanitizeDisplayName).refine(val => val.length >= 1, 'Uploader name required after sanitization'),
+  message: z.string().max(240).optional().transform(val => val ? sanitizeMessage(val) : undefined),
 });
 
 app.get('/api/healthz', (c) => {
@@ -159,6 +160,15 @@ app.post('/api/submissions/public', async (c) => {
       file: { name: file.name, size: file.size, type: file.type },
     });
     const stored = await saveGifToR2(c.env, file, streamer.slug);
+    
+    if (stored.sanitizationWarnings && stored.sanitizationWarnings.length > 0) {
+      console.info('[submission] GIF sanitization warnings', {
+        slug: streamer.slug,
+        fileName: file.name,
+        warnings: stored.sanitizationWarnings
+      });
+    }
+    
     const submission = await repos.submissions.create({
       streamerId: streamer.id,
       uploaderName: payload.data.uploaderName,
@@ -304,8 +314,8 @@ app.put('/api/settings/resolution', requireAuth, async (c) => {
 app.put('/api/settings/profile', requireAuth, async (c) => {
   const result = z
     .object({
-      displayName: z.string().min(2).max(64),
-      slug: z.string().min(3).max(40).regex(/^[a-z0-9-]+$/, 'Lowercase letters, numbers, hyphen'),
+      displayName: z.string().min(2).max(64).transform(sanitizeDisplayName).refine(val => val.length >= 2, 'Display name too short after sanitization'),
+      slug: z.string().min(3).max(40).transform(sanitizeSlug).regex(/^[a-z0-9-]+$/, 'Lowercase letters, numbers, hyphen').refine(val => val.length >= 3, 'Slug too short after sanitization'),
     })
     .safeParse(await c.req.json());
   if (!result.success) {
@@ -330,8 +340,8 @@ app.put('/api/settings/profile', requireAuth, async (c) => {
 app.put('/api/settings/password', requireAuth, async (c) => {
   const result = z
     .object({
-      currentPassword: z.string(),
-      newPassword: z.string().min(8).max(128),
+      currentPassword: z.string().transform(sanitizeText),
+      newPassword: z.string().min(8).max(128).transform(sanitizeText).refine(val => validateNoSqlInjection(val), 'Invalid password format'),
     })
     .safeParse(await c.req.json());
   if (!result.success) {

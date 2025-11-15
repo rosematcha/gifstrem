@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { clearToken } from '../lib/auth';
+import { sanitizeDisplayName, sanitizeSlug, sanitizeText, validateInput } from '../lib/sanitize';
 import type { Streamer } from '../types';
 
 const AccountSettingsPage = () => {
@@ -154,9 +155,18 @@ const AccountSettingsPage = () => {
                   type="text"
                   className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray focus:border-violet focus:outline-none"
                   value={profileForm.displayName}
-                  onChange={(event) =>
-                    setProfileForm((prev) => ({ ...prev, displayName: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    const sanitized = sanitizeDisplayName(event.target.value);
+                    if (validateInput(sanitized)) {
+                      setProfileForm((prev) => ({ ...prev, displayName: sanitized }));
+                    }
+                  }}
+                  onBlur={() => {
+                    const sanitized = sanitizeDisplayName(profileForm.displayName);
+                    if (sanitized !== profileForm.displayName) {
+                      setProfileForm((prev) => ({ ...prev, displayName: sanitized }));
+                    }
+                  }}
                   required
                 />
               </label>
@@ -166,9 +176,18 @@ const AccountSettingsPage = () => {
                   type="text"
                   className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray lowercase focus:border-violet focus:outline-none"
                   value={profileForm.slug}
-                  onChange={(event) =>
-                    setProfileForm((prev) => ({ ...prev, slug: event.target.value.toLowerCase() }))
-                  }
+                  onChange={(event) => {
+                    const sanitized = sanitizeSlug(event.target.value.toLowerCase());
+                    if (validateInput(sanitized)) {
+                      setProfileForm((prev) => ({ ...prev, slug: sanitized }));
+                    }
+                  }}
+                  onBlur={() => {
+                    const sanitized = sanitizeSlug(profileForm.slug);
+                    if (sanitized !== profileForm.slug) {
+                      setProfileForm((prev) => ({ ...prev, slug: sanitized }));
+                    }
+                  }}
                   required
                 />
                 <div className="mt-2 rounded-btn bg-charcoal border border-slate/30 p-2">
@@ -211,9 +230,12 @@ const AccountSettingsPage = () => {
                   type="password"
                   className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray focus:border-violet focus:outline-none"
                   value={passwordForm.currentPassword}
-                  onChange={(event) =>
-                    setPasswordForm((prev) => ({ ...prev, currentPassword: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    const sanitized = sanitizeText(event.target.value);
+                    if (validateInput(sanitized)) {
+                      setPasswordForm((prev) => ({ ...prev, currentPassword: sanitized }));
+                    }
+                  }}
                   required
                 />
               </label>
@@ -223,9 +245,12 @@ const AccountSettingsPage = () => {
                   type="password"
                   className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray focus:border-violet focus:outline-none"
                   value={passwordForm.newPassword}
-                  onChange={(event) =>
-                    setPasswordForm((prev) => ({ ...prev, newPassword: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    const sanitized = sanitizeText(event.target.value);
+                    if (validateInput(sanitized)) {
+                      setPasswordForm((prev) => ({ ...prev, newPassword: sanitized }));
+                    }
+                  }}
                   required
                 />
               </label>
@@ -235,9 +260,12 @@ const AccountSettingsPage = () => {
                   type="password"
                   className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray focus:border-violet focus:outline-none"
                   value={passwordForm.confirmPassword}
-                  onChange={(event) =>
-                    setPasswordForm((prev) => ({ ...prev, confirmPassword: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    const sanitized = sanitizeText(event.target.value);
+                    if (validateInput(sanitized)) {
+                      setPasswordForm((prev) => ({ ...prev, confirmPassword: sanitized }));
+                    }
+                  }}
                   required
                 />
               </label>
