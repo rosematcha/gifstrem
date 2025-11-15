@@ -33,10 +33,19 @@ const SubmissionPage = () => {
     setStatus('submitting');
     setError(null);
     const formData = new FormData();
+    console.debug('[submission] creating form data container');
     formData.append('slug', slug);
+    console.debug('[submission] appended slug', slug);
     formData.append('uploaderName', uploaderName);
+    console.debug('[submission] appended uploaderName', uploaderName);
     formData.append('message', message);
+    console.debug('[submission] appended message', message);
     formData.append('file', file);
+    console.debug('[submission] appended file blob', {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    });
     try {
       console.info('[submission] Uploading GIF', {
         slug,
@@ -52,6 +61,10 @@ const SubmissionPage = () => {
         fileNameValue: (formData.get('file') as File | null)?.name,
         fileTypeValue: (formData.get('file') as File | null)?.type,
         fileSizeValue: (formData.get('file') as File | null)?.size,
+      });
+      console.info('[submission] sending POST', {
+        url: `${api.defaults.baseURL ?? ''}/submissions/public`,
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
       const response = await api.post('/submissions/public', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },

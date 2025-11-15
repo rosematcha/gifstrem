@@ -2,8 +2,8 @@ export type GifstremBindings = {
   DB: D1Database;
   JWT_SECRET: string;
   SESSION_TTL_SECONDS?: string;
-  UPLOADTHING_TOKEN: string;
-  UPLOADTHING_SECRET?: string;
+  GIF_BUCKET: R2Bucket;
+  R2_PUBLIC_BASE_URL?: string;
 };
 
 export type UserRow = {

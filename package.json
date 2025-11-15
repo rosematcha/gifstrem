@@ -17,7 +17,6 @@
     "hono": "4.5.5",
     "jose": "5.2.1",
     "scrypt-js": "3.0.1",
-    "uploadthing": "7.7.4",
     "zod": "3.23.8"
   },
   "optionalDependencies": {

@@ -6,9 +6,8 @@ import { z } from 'zod';
 import { createRepositories, Repositories } from './_lib/repositories';
 import { serializeSubmission, serializeUser } from './_lib/serializers';
 import { createOverlayToken, generateAccessToken, hashPassword, verifyAccessToken, verifyPassword } from './_lib/security';
-import { createUploadClient } from './_lib/uploadthing';
 import type { GifstremBindings, SettingsShape, UserRow } from './_lib/types';
-import { UTFile } from 'uploadthing/server';
+import { saveGifToR2, deleteGifFromR2 } from './_lib/storage';
 
 type AppBindings = GifstremBindings;
 type AppVariables = {
@@ -159,31 +158,24 @@ app.post('/api/submissions/public', async (c) => {
   }
 
   try {
-    const uploadClient = createUploadClient(c.env);
-    const utFile = new UTFile([file], file.name, {
-      type: file.type,
-      lastModified: file.lastModified ?? Date.now(),
+    console.info('[submission] uploading to R2', {
+      slug: streamer.slug,
+      file: { name: file.name, size: file.size, type: file.type },
     });
-    const uploadResult = await uploadClient.uploadFiles(utFile, {
-      metadata: { slug: streamer.slug },
-    });
-    const normalized = Array.isArray(uploadResult) ? uploadResult : [uploadResult];
-    const first = normalized[0];
-    if (!first || first.error || !first.data) {
-      return c.json({ error: 'Failed to upload GIF' }, 502);
-    }
+    const stored = await saveGifToR2(c.env, file, streamer.slug);
     const submission = await repos.submissions.create({
       streamerId: streamer.id,
       uploaderName: payload.data.uploaderName,
       message: payload.data.message,
-      fileKey: first.data.key,
-      fileUrl: first.data.ufsUrl ?? first.data.url ?? '',
-      fileName: first.data.name,
-      fileSize: first.data.size,
+      fileKey: stored.key,
+      fileUrl: stored.url,
+      fileName: file.name,
+      fileSize: file.size,
       expiresInHours: 12,
     });
     return c.json({ submission: serializeSubmission(submission) }, 201);
   } catch (error) {
+    console.error('[submission] Unexpected failure while uploading', error);
     return c.json({ error: 'Unable to save submission', details: (error as Error).message }, 500);
   }
 });
@@ -216,9 +208,9 @@ app.post('/api/submissions/:id/review', requireAuth, async (c) => {
   await repos.submissions.updateStatus(submission.id, payload.data.action === 'approve' ? 'approved' : 'denied');
   if (payload.data.action === 'deny') {
     try {
-      await createUploadClient(c.env).deleteFiles(submission.file_key);
+      await deleteGifFromR2(c.env, submission.file_key);
     } catch (error) {
-      console.warn('Failed to delete UploadThing file', error);
+      console.warn('Failed to delete R2 file', error);
     }
   }
   const updated = await repos.submissions.findById(submission.id);
@@ -233,7 +225,7 @@ app.delete('/api/submissions/:id', requireAuth, async (c) => {
     return c.json({ error: 'Submission not found' }, 404);
   }
   try {
-    await createUploadClient(c.env).deleteFiles(submission.file_key);
+    await deleteGifFromR2(c.env, submission.file_key);
   } catch (error) {
     // ignore best-effort cleanup
   }
@@ -361,9 +353,9 @@ async function removeExpiredForStreamer(env: AppBindings, repos: Repositories, s
     return;
   }
   try {
-    await createUploadClient(env).deleteFiles(expired.map((submission) => submission.file_key));
+    await deleteGifFromR2(env, expired.map((submission) => submission.file_key));
   } catch (error) {
-    console.warn('Failed to delete expired UploadThing files', error);
+    console.warn('Failed to delete expired R2 files', error);
   }
   await repos.submissions.deleteMany(expired.map((submission) => submission.id));
 }

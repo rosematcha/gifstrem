@@ -12,3 +12,4 @@ dev.db
 Thumbs.db
 .wrangler/
 *.md
+.dev.vars

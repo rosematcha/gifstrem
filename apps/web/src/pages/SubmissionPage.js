@@ -21,16 +21,27 @@ const SubmissionPage = () => {
     const handleSubmit = async (event) => {
         event.preventDefault();
         if (!file || !slug) {
+            const message = `Missing fields: slug=${slug ?? 'undefined'}, file=${file ? 'present' : 'absent'}`;
+            console.warn('[submission] Aborting submission before request', message);
             setError('Please select a GIF first');
             return;
         }
         setStatus('submitting');
         setError(null);
         const formData = new FormData();
+        console.debug('[submission] creating form data container');
         formData.append('slug', slug);
+        console.debug('[submission] appended slug', slug);
         formData.append('uploaderName', uploaderName);
+        console.debug('[submission] appended uploaderName', uploaderName);
         formData.append('message', message);
+        console.debug('[submission] appended message', message);
         formData.append('file', file);
+        console.debug('[submission] appended file blob', {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+        });
         try {
             console.info('[submission] Uploading GIF', {
                 slug,
@@ -38,6 +49,18 @@ const SubmissionPage = () => {
                 messageLength: message.length,
                 fileName: file.name,
                 fileSize: file.size,
+            });
+            console.info('[submission] FormData preview', {
+                slugValue: formData.get('slug'),
+                uploaderNameValue: formData.get('uploaderName'),
+                messageValue: formData.get('message'),
+                fileNameValue: formData.get('file')?.name,
+                fileTypeValue: formData.get('file')?.type,
+                fileSizeValue: formData.get('file')?.size,
+            });
+            console.info('[submission] sending POST', {
+                url: `${api.defaults.baseURL ?? ''}/submissions/public`,
+                headers: { 'Content-Type': 'multipart/form-data' },
             });
             const response = await api.post('/submissions/public', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
@@ -54,6 +77,8 @@ const SubmissionPage = () => {
             console.error('[submission] Upload failed', {
                 status: axiosError.response?.status,
                 responseData: axiosError.response?.data,
+                requestHeaders: axiosError.config?.headers,
+                requestUrl: axiosError.config?.url,
             });
             setStatus('error');
             setError(messageText ?? 'Unable to submit GIF right now.');
