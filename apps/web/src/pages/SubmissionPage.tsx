@@ -25,6 +25,8 @@ const SubmissionPage = () => {
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!file || !slug) {
+      const message = `Missing fields: slug=${slug ?? 'undefined'}, file=${file ? 'present' : 'absent'}`;
+      console.warn('[submission] Aborting submission before request', message);
       setError('Please select a GIF first');
       return;
     }
@@ -43,6 +45,12 @@ const SubmissionPage = () => {
         fileName: file.name,
         fileSize: file.size,
       });
+      console.info('[submission] FormData preview', {
+        entries: Array.from(formData.entries()).map(([key, value]) => ({
+          key,
+          valueType: typeof value,
+        })),
+      });
       const response = await api.post('/submissions/public', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -57,6 +65,8 @@ const SubmissionPage = () => {
       console.error('[submission] Upload failed', {
         status: axiosError.response?.status,
         responseData: axiosError.response?.data,
+        requestHeaders: axiosError.config?.headers,
+        requestUrl: axiosError.config?.url,
       });
       setStatus('error');
       setError(messageText ?? 'Unable to submit GIF right now.');
