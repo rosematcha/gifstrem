@@ -10,4 +10,5 @@ dev.db
 .env
 .DS_Store
 Thumbs.db
+.wrangler/
 *.md
