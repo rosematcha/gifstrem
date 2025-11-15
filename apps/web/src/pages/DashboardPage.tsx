@@ -178,7 +178,10 @@ const DashboardPage = () => {
   return (
     <div className="min-h-screen bg-charcoal px-6 py-10 text-white">
       <header className="mx-auto flex max-w-5xl items-center justify-between border-b border-slate/30 pb-4">
-        <Link to="/" className="font-display text-2xl text-violet hover:text-softViolet">GIFstrem</Link>
+        <Link to="/" className="font-display text-2xl hover:text-softViolet">
+          <span className="text-white">GIF</span>
+          <span className="text-violet">strem</span>
+        </Link>
         <div className="flex-1 text-center">
           <p className="text-sm text-dimGray">Logged in as</p>
           <h2 className="text-2xl font-semibold">{userData.displayName}</h2>

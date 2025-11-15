@@ -34,7 +34,10 @@ const LoginPage = () => {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-charcoal px-4 text-white">
-      <Link to="/" className="font-display text-4xl text-violet mb-8 hover:text-softViolet">GIFstrem</Link>
+      <Link to="/" className="font-display text-4xl mb-8 hover:text-softViolet">
+        <span className="text-white">GIF</span>
+        <span className="text-violet">strem</span>
+      </Link>
       <form className="w-full max-w-md space-y-m rounded-modal bg-graphite border border-slate/30 p-l shadow-medium" onSubmit={handleSubmit}>
         <h1 className="text-2xl font-semibold">Welcome back</h1>
         {error && <p className="rounded-btn bg-coral/20 border border-coral/40 p-2 text-sm text-white">{error}</p>}

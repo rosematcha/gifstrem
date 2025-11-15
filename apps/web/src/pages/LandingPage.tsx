@@ -16,7 +16,10 @@ const LandingPage = () => {
     <main className="min-h-screen bg-charcoal text-white flex items-center">
       <div className="mx-auto flex max-w-4xl flex-col gap-l px-6 py-16 text-center">
         <div>
-          <h1 className="text-7xl sm:text-8xl font-display text-violet tracking-tight">GIFstrem</h1>
+          <h1 className="text-7xl sm:text-8xl font-display tracking-tight">
+            <span className="text-white">GIF</span>
+            <span className="text-violet">strem</span>
+          </h1>
           <p className="mt-6 text-lg text-coolGray max-w-2xl mx-auto">
             Turn your stream into a community bulletin board with crowd-sourced, moderated GIFs. Now in open alpha!
           </p>
@@ -33,7 +36,8 @@ const LandingPage = () => {
           </Link>
         </div>
         <p className="text-sm text-dimGray">
-          GIFstrem is{' '}
+          <span className="text-white">GIF</span>
+          <span className="text-violet">strem</span> is{' '}
           <a
             href="https://github.com/rosematcha/gifstrem"
             target="_blank"
