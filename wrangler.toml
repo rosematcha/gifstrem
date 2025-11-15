@@ -1,0 +1,11 @@
+name = "gifstrem"
+compatibility_date = "2024-10-04"
+pages_build_output_dir = "apps/web/dist"
+
+[vars]
+SESSION_TTL_SECONDS = "604800"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gifstrem-db"
+database_id = "00000000-0000-0000-0000-000000000000"

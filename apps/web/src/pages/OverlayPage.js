@@ -1,0 +1,541 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../lib/api';
+const RESOLUTION_SPECS = {
+    '720p': { width: 1280, height: 720 },
+    '1080p': { width: 1920, height: 1080 },
+    '2160p': { width: 3840, height: 2160 },
+};
+const SAFE_ZONE_PADDING = 24;
+const EMPTY_SAFE_ZONE = { x: 0, y: 0, width: 0, height: 0 };
+const DENSITY_COLS = 4;
+const DENSITY_ROWS = 3;
+const OverlayPage = () => {
+    const [search] = useSearchParams();
+    const token = search.get('token');
+    const query = useQuery({
+        queryKey: ['overlay', token],
+        queryFn: async () => {
+            const response = await api.get('/overlay/feed', { params: { token } });
+            return response.data;
+        },
+        enabled: Boolean(token),
+        refetchInterval: 4000,
+    });
+    const resolution = query.data?.streamer.settings?.preferredResolution ?? '1080p';
+    const customResolution = query.data?.streamer.settings?.customResolution;
+    const canvasSize = useMemo(() => {
+        if (resolution === 'custom' && customResolution) {
+            return customResolution;
+        }
+        if (resolution in RESOLUTION_SPECS) {
+            return RESOLUTION_SPECS[resolution];
+        }
+        return RESOLUTION_SPECS['720p'];
+    }, [customResolution, resolution]);
+    useEffect(() => {
+        const prevBodyBg = document.body.style.background;
+        const prevHtmlBg = document.documentElement.style.background;
+        document.body.style.background = 'transparent';
+        document.documentElement.style.background = 'transparent';
+        document.body.style.margin = '0';
+        return () => {
+            document.body.style.background = prevBodyBg;
+            document.documentElement.style.background = prevHtmlBg;
+        };
+    }, []);
+    const safeZoneSetting = query.data?.streamer.settings?.safeZones?.[resolution];
+    const safeZoneBounds = safeZoneSetting ??
+        {
+            zone: {
+                x: canvasSize.width * 0.25,
+                y: canvasSize.height * 0.2,
+                width: canvasSize.width * 0.5,
+                height: canvasSize.height * 0.6,
+            },
+            size: canvasSize,
+            enabled: true,
+        };
+    const safeZoneEnabled = safeZoneSetting?.enabled ?? true;
+    const effectiveSafeZone = safeZoneEnabled ? safeZoneBounds.zone : EMPTY_SAFE_ZONE;
+    const showSafeZone = safeZoneEnabled && (query.data?.streamer.settings?.showSafeZoneOverlay ?? false);
+    const layout = useMemo(() => {
+        if (!query.data)
+            return [];
+        const pockets = buildPockets(canvasSize, effectiveSafeZone);
+        const densityMap = createDensityMap(canvasSize);
+        const shortestSide = Math.min(canvasSize.width, canvasSize.height);
+        const minStickerSize = Math.max(72, Math.round(shortestSide * 0.07));
+        const maxStickerSize = Math.min(240, Math.round(shortestSide * 0.26));
+        const baseSize = Math.min(Math.max(shortestSide / 4, minStickerSize * 1.25), maxStickerSize);
+        const placements = [];
+        const items = query.data.submissions.map((submission, index) => {
+            const seedKey = `${submission.id}-${index}`;
+            const pocket = selectPocket(pockets, index, seedKey, densityMap);
+            const pocketCapacity = Math.max(48, Math.min(maxStickerSize, pocket.maxSize));
+            const minForPocket = Math.min(minStickerSize, pocketCapacity);
+            const scale = randomFromHash(`${seedKey}-scale`, 0.72, 1.35);
+            const desiredSize = clamp(baseSize * scale, minForPocket, pocketCapacity);
+            const offsetXRange = Math.max(1, pocket.rect.width - desiredSize);
+            const offsetYRange = Math.max(1, pocket.rect.height - desiredSize);
+            const offsetX = randomFromHash(`${seedKey}-offset-x-${pocket.usage}`, 0, offsetXRange);
+            const offsetY = randomFromHash(`${seedKey}-offset-y-${pocket.usage}`, 0, offsetYRange);
+            let rect = clampRect({
+                x: pocket.rect.x + offsetX,
+                y: pocket.rect.y + offsetY,
+                size: desiredSize,
+            }, canvasSize);
+            if (safeZoneEnabled) {
+                rect = keepOutsideSafeZone(rect, effectiveSafeZone, canvasSize);
+            }
+            rect = resolveOverlaps(rect, placements, effectiveSafeZone, canvasSize, seedKey, safeZoneEnabled);
+            placements.push(rect);
+            pocket.usage += 1;
+            pocket.usedArea += rect.size * rect.size;
+            applyDensity(densityMap, rect);
+            const rotationSignSeed = randomFromHash(`${seedKey}-rotation-sign`, 0, 1) >= 0.5 ? 1 : -1;
+            const rotationMagnitude = randomFromHash(`${seedKey}-rotation-mag`, 3, 13);
+            const flattenChance = randomFromHash(`${seedKey}-rotation-flat`, 0, 1);
+            const rotation = flattenChance > 0.9 ? 0 : rotationSignSeed * rotationMagnitude;
+            return {
+                id: submission.id,
+                submission,
+                x: rect.x,
+                y: rect.y,
+                size: rect.size,
+                rotation,
+                zIndex: 0,
+            };
+        });
+        const layered = [...items].sort((a, b) => a.size - b.size);
+        layered.forEach((item, idx) => {
+            item.zIndex = 200 + idx;
+        });
+        return items;
+    }, [
+        canvasSize,
+        query.data,
+        effectiveSafeZone.height,
+        effectiveSafeZone.width,
+        effectiveSafeZone.x,
+        effectiveSafeZone.y,
+        safeZoneEnabled,
+    ]);
+    if (!token) {
+        return _jsx("div", { className: "p-8 text-center text-red-400", children: "Missing overlay token." });
+    }
+    if (query.isLoading) {
+        return _jsx("div", { className: "p-8 text-center text-white", children: "Loading overlay\u2026" });
+    }
+    if (query.isError) {
+        const message = query.error instanceof Error ? query.error.message : 'Unknown error';
+        return (_jsxs("div", { className: "p-8 text-center text-red-400", children: ["Unable to load overlay feed. ", message, ". Check that your backend is running and the token is valid."] }));
+    }
+    if (!query.data) {
+        return _jsx("div", { className: "p-8 text-center text-white", children: "Loading overlay\u2026" });
+    }
+    return (_jsx("div", { className: "flex items-center justify-center bg-transparent", style: { width: canvasSize.width, height: canvasSize.height }, children: _jsxs("div", { className: "relative h-full w-full bg-transparent", children: [showSafeZone && (_jsx("div", { className: "absolute border-2 border-emerald-400/70 bg-emerald-400/10", style: {
+                        left: safeZoneBounds.zone.x,
+                        top: safeZoneBounds.zone.y,
+                        width: safeZoneBounds.zone.width,
+                        height: safeZoneBounds.zone.height,
+                    } })), layout.map((item) => (_jsx("img", { src: item.submission.fileUrl, alt: item.submission.uploaderName, style: {
+                        position: 'absolute',
+                        left: item.x,
+                        top: item.y,
+                        width: item.size,
+                        zIndex: item.zIndex,
+                        transform: `rotate(${item.rotation}deg)`,
+                    }, className: "drop-shadow-[0_10px_25px_rgba(15,15,30,0.7)] transition-all duration-500" }, item.id)))] }) }));
+};
+function buildPockets(canvas, safeZone) {
+    const margin = 24;
+    const paddedZone = padSafeZone(safeZone, SAFE_ZONE_PADDING, canvas);
+    const usableWidth = Math.max(0, canvas.width - margin * 2);
+    const usableHeight = Math.max(0, canvas.height - margin * 2);
+    const rawPockets = [];
+    const leftWidth = Math.max(0, paddedZone.x - margin);
+    if (leftWidth > 40) {
+        rawPockets.push(createPocket('left-strip', { x: margin, y: margin, width: leftWidth, height: usableHeight }, Math.max(70, leftWidth - SAFE_ZONE_PADDING / 2), 1.15));
+    }
+    const rightStart = paddedZone.x + paddedZone.width;
+    const rightWidth = Math.max(0, canvas.width - margin - rightStart);
+    if (rightWidth > 40) {
+        rawPockets.push(createPocket('right-strip', { x: rightStart, y: margin, width: rightWidth, height: usableHeight }, Math.max(70, rightWidth - SAFE_ZONE_PADDING / 2), 1.15));
+    }
+    const topHeight = Math.max(0, paddedZone.y - margin);
+    if (topHeight > 40) {
+        rawPockets.push(createPocket('top-band', { x: margin, y: margin, width: usableWidth, height: topHeight }, Math.max(70, topHeight - SAFE_ZONE_PADDING / 2), 1.1));
+    }
+    const bottomStart = paddedZone.y + paddedZone.height;
+    const bottomHeight = Math.max(0, canvas.height - margin - bottomStart);
+    if (bottomHeight > 40) {
+        rawPockets.push(createPocket('bottom-band', { x: margin, y: bottomStart, width: usableWidth, height: bottomHeight }, Math.max(70, bottomHeight - SAFE_ZONE_PADDING / 2), 1.1));
+    }
+    const cornerWidth = Math.min(leftWidth || usableWidth, Math.max(120, usableWidth / 3));
+    const cornerRightWidth = Math.min(rightWidth || usableWidth, Math.max(120, usableWidth / 3));
+    const cornerHeight = Math.min(topHeight || usableHeight, Math.max(120, usableHeight / 3));
+    const cornerBottomHeight = Math.min(bottomHeight || usableHeight, Math.max(120, usableHeight / 3));
+    if (cornerWidth > 60 && cornerHeight > 60) {
+        rawPockets.push(createPocket('top-left-pocket', { x: margin, y: margin, width: cornerWidth, height: cornerHeight }, Math.max(80, Math.min(cornerWidth, cornerHeight) - SAFE_ZONE_PADDING / 2), 1.35));
+    }
+    if (cornerRightWidth > 60 && cornerHeight > 60) {
+        rawPockets.push(createPocket('top-right-pocket', {
+            x: Math.max(margin, canvas.width - margin - cornerRightWidth),
+            y: margin,
+            width: cornerRightWidth,
+            height: cornerHeight,
+        }, Math.max(80, Math.min(cornerRightWidth, cornerHeight) - SAFE_ZONE_PADDING / 2), 1.35));
+    }
+    if (cornerWidth > 60 && cornerBottomHeight > 60) {
+        rawPockets.push(createPocket('bottom-left-pocket', {
+            x: margin,
+            y: Math.max(margin, canvas.height - margin - cornerBottomHeight),
+            width: cornerWidth,
+            height: cornerBottomHeight,
+        }, Math.max(80, Math.min(cornerWidth, cornerBottomHeight) - SAFE_ZONE_PADDING / 2), 1.35));
+    }
+    if (cornerRightWidth > 60 && cornerBottomHeight > 60) {
+        rawPockets.push(createPocket('bottom-right-pocket', {
+            x: Math.max(margin, canvas.width - margin - cornerRightWidth),
+            y: Math.max(margin, canvas.height - margin - cornerBottomHeight),
+            width: cornerRightWidth,
+            height: cornerBottomHeight,
+        }, Math.max(80, Math.min(cornerRightWidth, cornerBottomHeight) - SAFE_ZONE_PADDING / 2), 1.35));
+    }
+    if (rawPockets.length === 0) {
+        rawPockets.push(createPocket('fallback', {
+            x: margin,
+            y: margin,
+            width: Math.max(80, usableWidth),
+            height: Math.max(80, usableHeight),
+        }, Math.max(90, Math.min(usableWidth, usableHeight) - SAFE_ZONE_PADDING)));
+    }
+    const segmented = rawPockets.flatMap((pocket) => subdividePocket(pocket));
+    return segmented.length > 0 ? segmented : rawPockets;
+}
+function createDensityMap(canvas) {
+    const cols = DENSITY_COLS;
+    const rows = DENSITY_ROWS;
+    return {
+        cols,
+        rows,
+        cellWidth: canvas.width / cols,
+        cellHeight: canvas.height / rows,
+        values: new Array(cols * rows).fill(0),
+    };
+}
+function sampleDensity(map, rect) {
+    let total = 0;
+    let samples = 0;
+    const startCol = Math.max(0, Math.floor(rect.x / map.cellWidth));
+    const endCol = Math.min(map.cols - 1, Math.floor((rect.x + rect.width) / map.cellWidth));
+    const startRow = Math.max(0, Math.floor(rect.y / map.cellHeight));
+    const endRow = Math.min(map.rows - 1, Math.floor((rect.y + rect.height) / map.cellHeight));
+    for (let row = startRow; row <= endRow; row += 1) {
+        for (let col = startCol; col <= endCol; col += 1) {
+            samples += 1;
+            total += map.values[row * map.cols + col] ?? 0;
+        }
+    }
+    return samples === 0 ? 0 : Math.min(1, total / samples);
+}
+function applyDensity(map, rect) {
+    const width = rect.size;
+    const height = rect.size;
+    const startCol = Math.max(0, Math.floor(rect.x / map.cellWidth));
+    const endCol = Math.min(map.cols - 1, Math.floor((rect.x + width) / map.cellWidth));
+    const startRow = Math.max(0, Math.floor(rect.y / map.cellHeight));
+    const endRow = Math.min(map.rows - 1, Math.floor((rect.y + height) / map.cellHeight));
+    for (let row = startRow; row <= endRow; row += 1) {
+        for (let col = startCol; col <= endCol; col += 1) {
+            const cellIndex = row * map.cols + col;
+            const cellX1 = col * map.cellWidth;
+            const cellY1 = row * map.cellHeight;
+            const cellX2 = cellX1 + map.cellWidth;
+            const cellY2 = cellY1 + map.cellHeight;
+            const overlapWidth = Math.max(0, Math.min(rect.x + width, cellX2) - Math.max(rect.x, cellX1));
+            const overlapHeight = Math.max(0, Math.min(rect.y + height, cellY2) - Math.max(rect.y, cellY1));
+            const overlapArea = overlapWidth * overlapHeight;
+            if (overlapArea <= 0)
+                continue;
+            const cellArea = map.cellWidth * map.cellHeight;
+            const contribution = overlapArea / cellArea;
+            map.values[cellIndex] = Math.min(1, map.values[cellIndex] + contribution);
+        }
+    }
+}
+function createPocket(name, rect, maxSize, priority = 1) {
+    const boundedMax = Math.max(48, Math.min(maxSize, rect.width, rect.height));
+    return {
+        name,
+        rect,
+        maxSize: boundedMax,
+        usage: 0,
+        usedArea: 0,
+        priority,
+    };
+}
+function subdividePocket(pocket) {
+    const rect = pocket.rect;
+    const segments = [];
+    const aspectRatio = rect.width / Math.max(1, rect.height);
+    const inverseAspectRatio = rect.height / Math.max(1, rect.width);
+    const maxSlices = 3;
+    const targetSize = 360;
+    const columns = aspectRatio > 1.35 ? Math.min(maxSlices, Math.max(1, Math.round(rect.width / targetSize) || 1)) : 1;
+    const rows = inverseAspectRatio > 1.35 ? Math.min(maxSlices, Math.max(1, Math.round(rect.height / targetSize) || 1)) : 1;
+    if (columns === 1 && rows === 1) {
+        return [pocket];
+    }
+    const sliceWidth = rect.width / columns;
+    const sliceHeight = rect.height / rows;
+    const gapX = columns > 1 ? Math.min(18, sliceWidth * 0.2) : 0;
+    const gapY = rows > 1 ? Math.min(18, sliceHeight * 0.2) : 0;
+    for (let row = 0; row < rows; row += 1) {
+        for (let col = 0; col < columns; col += 1) {
+            const width = sliceWidth - gapX;
+            const height = sliceHeight - gapY;
+            if (width < 60 || height < 60) {
+                continue;
+            }
+            const segmentRect = {
+                x: rect.x + col * sliceWidth + gapX / 2,
+                y: rect.y + row * sliceHeight + gapY / 2,
+                width,
+                height,
+            };
+            segments.push(createPocket(`${pocket.name}-${segments.length}`, segmentRect, pocket.maxSize, pocket.priority + 0.05));
+        }
+    }
+    return segments.length > 0 ? segments : [pocket];
+}
+function keepOutsideSafeZone(rect, safeZone, canvas) {
+    const paddedZone = padSafeZone(safeZone, SAFE_ZONE_PADDING, canvas);
+    const candidate = clampRect(rect, canvas);
+    if (!rectsOverlap(candidate, paddedZone)) {
+        return candidate;
+    }
+    const spaces = [
+        {
+            name: 'left',
+            available: paddedZone.x,
+            compute: () => ({
+                x: Math.max(0, paddedZone.x - candidate.size - SAFE_ZONE_PADDING),
+                y: clamp(candidate.y, SAFE_ZONE_PADDING, canvas.height - candidate.size - SAFE_ZONE_PADDING),
+            }),
+        },
+        {
+            name: 'right',
+            available: canvas.width - (paddedZone.x + paddedZone.width),
+            compute: () => ({
+                x: Math.min(canvas.width - candidate.size - SAFE_ZONE_PADDING, paddedZone.x + paddedZone.width + SAFE_ZONE_PADDING),
+                y: clamp(candidate.y, SAFE_ZONE_PADDING, canvas.height - candidate.size - SAFE_ZONE_PADDING),
+            }),
+        },
+        {
+            name: 'top',
+            available: paddedZone.y,
+            compute: () => ({
+                x: clamp(candidate.x, SAFE_ZONE_PADDING, canvas.width - candidate.size - SAFE_ZONE_PADDING),
+                y: Math.max(0, paddedZone.y - candidate.size - SAFE_ZONE_PADDING),
+            }),
+        },
+        {
+            name: 'bottom',
+            available: canvas.height - (paddedZone.y + paddedZone.height),
+            compute: () => ({
+                x: clamp(candidate.x, SAFE_ZONE_PADDING, canvas.width - candidate.size - SAFE_ZONE_PADDING),
+                y: Math.min(canvas.height - candidate.size - SAFE_ZONE_PADDING, paddedZone.y + paddedZone.height + SAFE_ZONE_PADDING),
+            }),
+        },
+    ];
+    const candidates = spaces
+        .filter((space) => space.available > SAFE_ZONE_PADDING)
+        .map((space) => {
+        const next = space.compute();
+        const sizeLimit = Math.min(candidate.size, space.available - SAFE_ZONE_PADDING / 2);
+        const size = Math.max(48, Math.min(candidate.size, sizeLimit));
+        return {
+            rect: clampRect({ x: next.x, y: next.y, size }, canvas),
+            clearance: space.available,
+        };
+    })
+        .filter((option) => option.rect.size >= 48 && !rectsOverlap(option.rect, paddedZone));
+    if (candidates.length > 0) {
+        const best = candidates.reduce((prev, current) => (current.clearance > prev.clearance ? current : prev));
+        return best.rect;
+    }
+    if (candidate.size <= 48) {
+        const fallback = clampRect({
+            x: SAFE_ZONE_PADDING,
+            y: SAFE_ZONE_PADDING,
+            size: candidate.size,
+        }, canvas);
+        if (!rectsOverlap(fallback, paddedZone)) {
+            return fallback;
+        }
+        return clampRect({
+            x: canvas.width - candidate.size - SAFE_ZONE_PADDING,
+            y: SAFE_ZONE_PADDING,
+            size: candidate.size,
+        }, canvas);
+    }
+    return keepOutsideSafeZone({
+        x: candidate.x,
+        y: candidate.y,
+        size: Math.max(48, candidate.size * 0.85),
+    }, safeZone, canvas);
+}
+function selectPocket(pockets, index, seed, density) {
+    if (pockets.length === 0) {
+        return createPocket('fallback', {
+            x: 16,
+            y: 16,
+            width: 240,
+            height: 240,
+        }, 160, 1);
+    }
+    const scored = pockets
+        .map((pocket) => {
+        const area = pocket.rect.width * pocket.rect.height;
+        const freeArea = Math.max(1, area - pocket.usedArea);
+        const penalty = pocket.usage * pocket.maxSize * 25;
+        const noise = randomFromHash(`${seed}-${pocket.name}-jitter`, -40, 40);
+        const densityFactor = 1 - sampleDensity(density, pocket.rect);
+        const score = freeArea * pocket.priority * densityFactor - penalty + noise;
+        return { pocket, score };
+    })
+        .sort((a, b) => b.score - a.score);
+    const candidatePool = scored.slice(0, Math.min(4, scored.length));
+    const randomPickIndex = Math.floor(randomFromHash(`${seed}-pocket-choice-${index}`, 0, 0.999) * candidatePool.length);
+    return candidatePool[randomPickIndex]?.pocket ?? scored[0].pocket;
+}
+function randomFromHash(seed, min = 0, max = 1) {
+    const hash = hashString(seed);
+    const fraction = Math.abs(Math.sin(hash) * 10000) % 1;
+    return min + (max - min) * fraction;
+}
+function hashString(input) {
+    let hash = 0;
+    for (let i = 0; i < input.length; i += 1) {
+        hash = (hash << 5) - hash + input.charCodeAt(i);
+        hash |= 0;
+    }
+    return hash;
+}
+function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+}
+const MAX_OVERLAP_RATIO = 0.08;
+function resolveOverlaps(rect, existing, safeZone, canvas, seed = '', respectSafeZone = true) {
+    if (existing.length === 0) {
+        return rect;
+    }
+    let size = rect.size;
+    let bestCandidate = rect;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (let shrink = 0; shrink < 4; shrink += 1) {
+        const shift = size * 0.45;
+        const offsets = [{ dx: 0, dy: 0 }];
+        const steps = 10;
+        for (let i = 0; i < steps; i += 1) {
+            const angle = (i / steps) * Math.PI * 2 + randomFromHash(`${seed}-overlap-${rect.x}-${rect.y}-${shrink}-${i}`, 0, Math.PI / 6);
+            offsets.push({
+                dx: Math.cos(angle) * shift,
+                dy: Math.sin(angle) * shift,
+            });
+        }
+        for (const offset of offsets) {
+            let candidate = clampRect({
+                x: rect.x + offset.dx,
+                y: rect.y + offset.dy,
+                size,
+            }, canvas);
+            if (respectSafeZone) {
+                candidate = keepOutsideSafeZone(candidate, safeZone, canvas);
+            }
+            const score = overlapScore(candidate, existing);
+            if (score < bestScore) {
+                bestScore = score;
+                bestCandidate = candidate;
+            }
+            if (score <= MAX_OVERLAP_RATIO) {
+                return candidate;
+            }
+        }
+        size = Math.max(60, size * 0.88);
+    }
+    return findLowOverlapPlacement(bestCandidate, existing, safeZone, canvas, seed, respectSafeZone);
+}
+function clampRect(rect, canvas) {
+    return {
+        x: clamp(rect.x, 0, canvas.width - rect.size),
+        y: clamp(rect.y, 0, canvas.height - rect.size),
+        size: rect.size,
+    };
+}
+function isAcceptable(rect, existing) {
+    return existing.every((placed) => overlapRatio(rect, placed) <= MAX_OVERLAP_RATIO);
+}
+function overlapArea(a, b) {
+    const width = Math.max(0, Math.min(a.x + a.size, b.x + b.size) - Math.max(a.x, b.x));
+    const height = Math.max(0, Math.min(a.y + a.size, b.y + b.size) - Math.max(a.y, b.y));
+    return width * height;
+}
+function overlapRatio(a, b) {
+    const overlap = overlapArea(a, b);
+    if (overlap === 0)
+        return 0;
+    const areaA = a.size * a.size;
+    const areaB = b.size * b.size;
+    return overlap / Math.min(areaA, areaB);
+}
+function overlapScore(candidate, existing) {
+    if (existing.length === 0)
+        return 0;
+    return Math.max(...existing.map((placed) => overlapRatio(candidate, placed)));
+}
+function findLowOverlapPlacement(seedCandidate, existing, safeZone, canvas, seed, respectSafeZone = true) {
+    let best = seedCandidate;
+    let bestScore = overlapScore(seedCandidate, existing);
+    const attempts = 28;
+    if (bestScore <= MAX_OVERLAP_RATIO) {
+        return seedCandidate;
+    }
+    const widthLimit = canvas.width - seedCandidate.size;
+    const heightLimit = canvas.height - seedCandidate.size;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const offsetSeed = `${seed}-fallback-${attempt}`;
+        const randomColumn = randomFromHash(`${offsetSeed}-x`, 0, widthLimit);
+        const randomRow = randomFromHash(`${offsetSeed}-y`, 0, heightLimit);
+        let candidate = clampRect({ x: randomColumn, y: randomRow, size: seedCandidate.size }, canvas);
+        if (respectSafeZone) {
+            candidate = keepOutsideSafeZone(candidate, safeZone, canvas);
+        }
+        const score = overlapScore(candidate, existing);
+        if (score < bestScore) {
+            bestScore = score;
+            best = candidate;
+        }
+        if (score <= MAX_OVERLAP_RATIO * 0.8) {
+            return candidate;
+        }
+    }
+    return best;
+}
+function padSafeZone(safeZone, padding, canvas) {
+    const x = clamp(safeZone.x - padding, 0, canvas.width);
+    const y = clamp(safeZone.y - padding, 0, canvas.height);
+    const width = Math.min(canvas.width - x, safeZone.width + padding * 2);
+    const height = Math.min(canvas.height - y, safeZone.height + padding * 2);
+    return { x, y, width, height };
+}
+function rectsOverlap(a, b) {
+    const widthA = typeof a.size === 'number' ? a.size : a.width ?? 0;
+    const heightA = typeof a.size === 'number' ? a.size : a.height ?? 0;
+    return a.x < b.x + b.width && a.x + widthA > b.x && a.y < b.y + b.height && a.y + heightA > b.y;
+}
+export default OverlayPage;

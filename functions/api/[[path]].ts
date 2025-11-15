@@ -1,0 +1,373 @@
+import type { PagesFunction } from '@cloudflare/workers-types';
+import { Hono } from 'hono';
+import type { Context, Next } from 'hono';
+import { cors } from 'hono/cors';
+import { z } from 'zod';
+import { createRepositories, Repositories } from './_lib/repositories';
+import { serializeSubmission, serializeUser } from './_lib/serializers';
+import { createOverlayToken, generateAccessToken, hashPassword, verifyAccessToken, verifyPassword } from './_lib/security';
+import { createUploadClient } from './_lib/uploadthing';
+import type { GifstremBindings, SettingsShape, UserRow } from './_lib/types';
+import { UTFile } from 'uploadthing/server';
+
+type AppBindings = GifstremBindings;
+type AppVariables = {
+  repos: Repositories;
+  user?: UserRow;
+};
+
+const app = new Hono<{ Bindings: AppBindings; Variables: AppVariables }>();
+
+app.use('*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type'] }));
+app.use('*', async (c, next) => {
+  c.set('repos', createRepositories(c.env));
+  await next();
+});
+
+const signupSchema = z.object({
+  username: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_]+$/, 'Only letters, numbers, underscores'),
+  password: z.string().min(8).max(128),
+  displayName: z.string().min(2).max(64),
+  slug: z.string().min(3).max(40).regex(/^[a-z0-9-]+$/, 'Lowercase letters, numbers, hyphen'),
+});
+
+const loginSchema = z.object({
+  username: z.string(),
+  password: z.string(),
+});
+
+const safeZoneSchema = z.object({
+  resolution: z.enum(['720p', '1080p', '2160p', 'custom']),
+  size: z.object({
+    width: z.number().min(100),
+    height: z.number().min(100),
+  }),
+  zone: z.object({
+    x: z.number().min(0),
+    y: z.number().min(0),
+    width: z.number().min(10),
+    height: z.number().min(10),
+  }),
+  enabled: z.boolean().optional(),
+});
+
+const submissionSchema = z.object({
+  slug: z.string().min(3),
+  uploaderName: z.string().min(1).max(64),
+  message: z.string().max(240).optional(),
+});
+
+app.get('/api/healthz', (c) => {
+  return c.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+app.post('/api/auth/signup', async (c) => {
+  const parsed = signupSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid payload', details: parsed.error.format() }, 400);
+  }
+  const repos = c.get('repos');
+  const { username, password, displayName, slug } = parsed.data;
+  if (await repos.users.findByUsername(username)) {
+    return c.json({ error: 'Username already taken' }, 409);
+  }
+  if (await repos.users.findBySlug(slug)) {
+    return c.json({ error: 'Slug already in use' }, 409);
+  }
+  const user = await repos.users.create({
+    username,
+    passwordHash: await hashPassword(password),
+    displayName,
+    slug,
+    overlayToken: createOverlayToken(),
+  });
+  const token = await generateAccessToken(c.env, user);
+  return c.json({ token, user: serializeUser(user) }, 201);
+});
+
+app.post('/api/auth/login', async (c) => {
+  const parsed = loginSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid payload' }, 400);
+  }
+  const repos = c.get('repos');
+  const existing = await repos.users.findByUsername(parsed.data.username);
+  if (!existing) {
+    return c.json({ error: 'Invalid credentials' }, 401);
+  }
+  const valid = await verifyPassword(existing.password_hash, parsed.data.password);
+  if (!valid) {
+    return c.json({ error: 'Invalid credentials' }, 401);
+  }
+  const token = await generateAccessToken(c.env, existing);
+  return c.json({ token, user: serializeUser(existing) });
+});
+
+app.get('/api/auth/me', requireAuth, async (c) => {
+  return c.json({ user: serializeUser(c.get('user')!) });
+});
+
+app.get('/api/public/streamers/:slug', async (c) => {
+  const slug = c.req.param('slug');
+  const repos = c.get('repos');
+  const streamer = await repos.users.findBySlug(slug);
+  if (!streamer) {
+    return c.json({ error: 'Streamer not found' }, 404);
+  }
+  return c.json({ streamer: serializeUser(streamer) });
+});
+
+app.get('/api/overlay/feed', async (c) => {
+  const token = c.req.query('token');
+  if (!token) {
+    return c.json({ error: 'Missing token' }, 400);
+  }
+  const repos = c.get('repos');
+  const streamer = await repos.users.findByOverlayToken(token);
+  if (!streamer) {
+    return c.json({ error: 'Unknown overlay token' }, 404);
+  }
+  await removeExpiredForStreamer(c.env, repos, streamer.id);
+  const submissions = (await repos.submissions.listActiveForOverlay(streamer.id)).map(serializeSubmission);
+  return c.json({ streamer: serializeUser(streamer), submissions });
+});
+
+app.post('/api/submissions/public', async (c) => {
+  const form = await c.req.formData();
+  const payload = submissionSchema.safeParse({
+    slug: form.get('slug'),
+    uploaderName: form.get('uploaderName'),
+    message: form.get('message') ?? undefined,
+  });
+  if (!payload.success) {
+    return c.json({ error: 'Invalid payload', details: payload.error.format() }, 400);
+  }
+  const file = form.get('file');
+  if (!(file instanceof File)) {
+    return c.json({ error: 'GIF file is required.' }, 400);
+  }
+  if (file.type !== 'image/gif') {
+    return c.json({ error: 'Only GIF uploads are supported right now.' }, 400);
+  }
+  if (file.size > 15 * 1024 * 1024) {
+    return c.json({ error: 'GIF file exceeds the 15MB limit.' }, 400);
+  }
+  const repos = c.get('repos');
+  const streamer = await repos.users.findBySlug(payload.data.slug);
+  if (!streamer) {
+    return c.json({ error: 'Streamer not found' }, 404);
+  }
+
+  try {
+    const uploadClient = createUploadClient(c.env);
+    const utFile = new UTFile([file], file.name, {
+      type: file.type,
+      lastModified: file.lastModified ?? Date.now(),
+    });
+    const uploadResult = await uploadClient.uploadFiles(utFile, {
+      metadata: { slug: streamer.slug },
+    });
+    const normalized = Array.isArray(uploadResult) ? uploadResult : [uploadResult];
+    const first = normalized[0];
+    if (!first || first.error || !first.data) {
+      return c.json({ error: 'Failed to upload GIF' }, 502);
+    }
+    const submission = await repos.submissions.create({
+      streamerId: streamer.id,
+      uploaderName: payload.data.uploaderName,
+      message: payload.data.message,
+      fileKey: first.data.key,
+      fileUrl: first.data.ufsUrl ?? first.data.url ?? '',
+      fileName: first.data.name,
+      fileSize: first.data.size,
+      expiresInHours: 12,
+    });
+    return c.json({ submission: serializeSubmission(submission) }, 201);
+  } catch (error) {
+    return c.json({ error: 'Unable to save submission', details: (error as Error).message }, 500);
+  }
+});
+
+app.get('/api/submissions/pending', requireAuth, async (c) => {
+  const user = c.get('user')!;
+  const repos = c.get('repos');
+  const submissions = (await repos.submissions.listByStatus(user.id, 'pending')).map(serializeSubmission);
+  return c.json({ submissions });
+});
+
+app.get('/api/submissions/approved', requireAuth, async (c) => {
+  const user = c.get('user')!;
+  const repos = c.get('repos');
+  const submissions = (await repos.submissions.listByStatus(user.id, 'approved')).map(serializeSubmission);
+  return c.json({ submissions });
+});
+
+app.post('/api/submissions/:id/review', requireAuth, async (c) => {
+  const payload = z.object({ action: z.enum(['approve', 'deny']) }).safeParse(await c.req.json());
+  if (!payload.success) {
+    return c.json({ error: 'Invalid payload' }, 400);
+  }
+  const repos = c.get('repos');
+  const submission = await repos.submissions.findById(c.req.param('id'));
+  const user = c.get('user')!;
+  if (!submission || submission.streamer_id !== user.id) {
+    return c.json({ error: 'Submission not found' }, 404);
+  }
+  await repos.submissions.updateStatus(submission.id, payload.data.action === 'approve' ? 'approved' : 'denied');
+  if (payload.data.action === 'deny') {
+    try {
+      await createUploadClient(c.env).deleteFiles(submission.file_key);
+    } catch (error) {
+      console.warn('Failed to delete UploadThing file', error);
+    }
+  }
+  const updated = await repos.submissions.findById(submission.id);
+  return c.json({ submission: serializeSubmission(updated!) });
+});
+
+app.delete('/api/submissions/:id', requireAuth, async (c) => {
+  const repos = c.get('repos');
+  const submission = await repos.submissions.findById(c.req.param('id'));
+  const user = c.get('user')!;
+  if (!submission || submission.streamer_id !== user.id) {
+    return c.json({ error: 'Submission not found' }, 404);
+  }
+  try {
+    await createUploadClient(c.env).deleteFiles(submission.file_key);
+  } catch (error) {
+    // ignore best-effort cleanup
+  }
+  await repos.submissions.delete(submission.id);
+  return c.body(null, 204);
+});
+
+app.get('/api/settings', requireAuth, async (c) => {
+  return c.json({ user: serializeUser(c.get('user')!) });
+});
+
+app.put('/api/settings/safe-zone', requireAuth, async (c) => {
+  const result = safeZoneSchema.safeParse(await c.req.json());
+  if (!result.success) {
+    return c.json({ error: 'Invalid payload', details: result.error.format() }, 400);
+  }
+  const user = c.get('user')!;
+  const settings = ensureSettings(user.settings);
+  settings.safeZones[result.data.resolution] = {
+    zone: result.data.zone,
+    size: result.data.size,
+    enabled: result.data.enabled ?? true,
+  };
+  await c.get('repos').users.updateSettings(user.id, settings);
+  const updated = await c.get('repos').users.findById(user.id);
+  return c.json({ user: serializeUser(updated!) });
+});
+
+app.post('/api/settings/overlay-token/rotate', requireAuth, async (c) => {
+  const user = c.get('user')!;
+  const newToken = createOverlayToken();
+  await c.get('repos').users.updateOverlayToken(user.id, newToken);
+  return c.json({ token: newToken });
+});
+
+app.put('/api/settings/show-safe-zone', requireAuth, async (c) => {
+  const result = z.object({ show: z.boolean() }).safeParse(await c.req.json());
+  if (!result.success) {
+    return c.json({ error: 'Invalid payload' }, 400);
+  }
+  const user = c.get('user')!;
+  const settings = ensureSettings(user.settings);
+  settings.showSafeZoneOverlay = result.data.show;
+  await c.get('repos').users.updateSettings(user.id, settings);
+  const updated = await c.get('repos').users.findById(user.id);
+  return c.json({ user: serializeUser(updated!) });
+});
+
+app.put('/api/settings/resolution', requireAuth, async (c) => {
+  const result = z
+    .object({
+      resolution: z.enum(['720p', '1080p', '2160p', 'custom']),
+      customSize: z
+        .object({
+          width: z.number().min(640),
+          height: z.number().min(360),
+        })
+        .optional(),
+    })
+    .safeParse(await c.req.json());
+  if (!result.success) {
+    return c.json({ error: 'Invalid payload' }, 400);
+  }
+  if (result.data.resolution === 'custom' && !result.data.customSize) {
+    return c.json({ error: 'Custom size required for custom resolution' }, 400);
+  }
+  const user = c.get('user')!;
+  const settings = ensureSettings(user.settings);
+  settings.preferredResolution = result.data.resolution;
+  if (result.data.resolution === 'custom') {
+    settings.customResolution = result.data.customSize!;
+  } else {
+    delete settings.customResolution;
+  }
+  await c.get('repos').users.updateSettings(user.id, settings);
+  const updated = await c.get('repos').users.findById(user.id);
+  return c.json({ user: serializeUser(updated!) });
+});
+
+app.onError((err, c) => {
+  console.error(err);
+  return c.json({ error: 'Unexpected server error' }, 500);
+});
+
+async function requireAuth(
+  c: Context<{ Bindings: AppBindings; Variables: AppVariables }>,
+  next: Next,
+) {
+  const header = c.req.header('authorization');
+  if (!header) {
+    return c.json({ error: 'Missing Authorization header' }, 401);
+  }
+  const token = header.replace(/Bearer\s+/i, '').trim();
+  try {
+    const payload = await verifyAccessToken(c.env, token);
+    const user = await c.get('repos').users.findById(payload.userId);
+    if (!user) {
+      return c.json({ error: 'Unknown user' }, 401);
+    }
+    c.set('user', user);
+    await next();
+  } catch (error) {
+    return c.json({ error: 'Invalid token' }, 401);
+  }
+}
+
+function ensureSettings(payload: string): SettingsShape {
+  try {
+    const parsed = JSON.parse(payload) as SettingsShape;
+    if (parsed && parsed.safeZones) {
+      return parsed;
+    }
+  } catch (error) {
+    // ignore invalid JSON
+  }
+  return {
+    safeZones: {},
+    animation: { type: 'pop', durationMs: 600 },
+  };
+}
+
+async function removeExpiredForStreamer(env: AppBindings, repos: Repositories, streamerId: string) {
+  const expired = await repos.submissions.listExpired(streamerId);
+  if (expired.length === 0) {
+    return;
+  }
+  try {
+    await createUploadClient(env).deleteFiles(expired.map((submission) => submission.file_key));
+  } catch (error) {
+    console.warn('Failed to delete expired UploadThing files', error);
+  }
+  await repos.submissions.deleteMany(expired.map((submission) => submission.id));
+}
+
+export const onRequest: PagesFunction<AppBindings> = (context) => {
+  return app.fetch(context.request, context.env, context);
+};

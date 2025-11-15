@@ -1,0 +1,21 @@
+{
+  "name": "@gifstrem/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development electron .",
+    "build": "tsc -p tsconfig.json",
+    "start": "electron dist/main.js"
+  },
+  "dependencies": {
+    "dotenv": "16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.8.1",
+    "electron": "31.4.0",
+    "cross-env": "7.0.3",
+    "typescript": "5.5.4"
+  }
+}

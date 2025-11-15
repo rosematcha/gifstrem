@@ -1,0 +1,29 @@
+{
+  "name": "gifstrem",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Gifstrem monorepo containing Cloudflare Pages API, submission frontend, overlay, and desktop moderator app.",
+  "workspaces": [
+    "apps/web",
+    "apps/desktop"
+  ],
+  "scripts": {
+    "lint": "biome check .",
+    "format": "biome format .",
+    "dev": "npm run dev -w @gifstrem/web",
+    "pages:dev": "npm run build -w @gifstrem/web && wrangler pages dev apps/web/dist"
+  },
+  "dependencies": {
+    "hono": "4.5.5",
+    "jose": "5.2.1",
+    "scrypt-js": "3.0.1",
+    "uploadthing": "7.7.4",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.6.4",
+    "@cloudflare/workers-types": "4.20241018.0",
+    "concurrently": "8.2.2",
+    "wrangler": "3.80.0"
+  }
+}
