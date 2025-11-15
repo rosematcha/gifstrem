@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import type { Streamer } from '../types';
+import type { AxiosError } from 'axios';
 
 const SubmissionPage = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -35,15 +36,28 @@ const SubmissionPage = () => {
     formData.append('message', message);
     formData.append('file', file);
     try {
-      await api.post('/submissions/public', formData, {
+      console.info('[submission] Uploading GIF', {
+        slug,
+        uploaderName,
+        messageLength: message.length,
+        fileName: file.name,
+        fileSize: file.size,
+      });
+      const response = await api.post('/submissions/public', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+      console.info('[submission] Upload success', response.data);
       setStatus('success');
       setUploaderName('');
       setMessage('');
       setFile(null);
     } catch (err) {
-      const messageText = (err as { response?: { data?: { error?: string } } }).response?.data?.error;
+      const axiosError = err as AxiosError<{ error?: string; details?: unknown }>;
+      const messageText = axiosError.response?.data?.error ?? axiosError.message;
+      console.error('[submission] Upload failed', {
+        status: axiosError.response?.status,
+        responseData: axiosError.response?.data,
+      });
       setStatus('error');
       setError(messageText ?? 'Unable to submit GIF right now.');
     }
