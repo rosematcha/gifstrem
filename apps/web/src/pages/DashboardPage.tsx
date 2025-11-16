@@ -189,12 +189,9 @@ const DashboardPage = () => {
             <h2 className="text-base md:text-2xl font-semibold truncate">{userData.displayName}</h2>
           </div>
           <div className="flex gap-2 md:gap-4 text-xs md:text-sm shrink-0">
-            <Link className="hidden md:inline text-violet hover:text-softViolet font-semibold" to="/settings">
+            {/* <Link className="hidden md:inline text-violet hover:text-softViolet font-semibold" to="/settings">
               Settings
-            </Link>
-            <Link className="hidden md:inline text-violet hover:text-softViolet font-semibold" to={`/${userData.slug}`} target="_blank">
-              Submission link
-            </Link>
+            </Link> */}
             <button
               className="text-violet hover:text-softViolet font-semibold"
               onClick={() => {

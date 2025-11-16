@@ -48,7 +48,7 @@ const SignupPage = () => {
         <h1 className="text-2xl font-semibold">Create streamer account</h1>
         {error && <p className="rounded-btn bg-coral/20 border border-coral/40 p-2 text-sm text-white">{error}</p>}
         <label className="block text-sm font-semibold text-coolGray">
-          Your name
+          Your name (used cosmetically)
           <input
             type="text"
             className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray focus:border-violet focus:outline-none"
