@@ -36,8 +36,7 @@ const LandingPage = () => {
           </Link>
         </div>
         <p className="text-sm text-dimGray">
-          <span className="text-white">GIF</span>
-          <span className="text-violet">strem</span> is{' '}
+          <span className="text-violet">GIFstrem</span> is{' '}
           <a
             href="https://github.com/rosematcha/gifstrem"
             target="_blank"
