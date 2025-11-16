@@ -52,7 +52,7 @@ const SignupPage = () => {
           <input
             type="text"
             className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray focus:border-violet focus:outline-none"
-            placeholder="e.g., Cinappses"
+            placeholder=""
             value={form.displayName}
             onChange={(event) => {
               const sanitized = sanitizeDisplayName(event.target.value);
@@ -74,7 +74,7 @@ const SignupPage = () => {
           <input
             type="text"
             className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray lowercase focus:border-violet focus:outline-none"
-            placeholder="cinappses"
+            placeholder=""
             value={form.slug}
             onChange={(event) => {
               const sanitized = sanitizeSlug(event.target.value.toLowerCase());
@@ -90,12 +90,6 @@ const SignupPage = () => {
             }}
             required
           />
-          <div className="mt-2 rounded-btn bg-charcoal border border-slate/30 p-2">
-            <p className="text-xs text-dimGray mb-1">Your submission link will be:</p>
-            <p className="text-sm font-mono text-violet">
-              gifstrem.com/{form.slug || 'your-slug'}
-            </p>
-          </div>
           <span className="text-xs text-dimGray mt-1 block">
             You'll use this slug to login and share with viewers
           </span>

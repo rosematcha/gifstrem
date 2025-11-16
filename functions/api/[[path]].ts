@@ -26,7 +26,7 @@ app.use('*', async (c, next) => {
 
 const signupSchema = z.object({
   displayName: z.string().min(2).max(64).transform(sanitizeDisplayName).refine(val => val.length >= 2, 'Display name too short after sanitization'),
-  slug: z.string().min(3).max(40).transform(sanitizeSlug).regex(/^[a-z0-9-]+$/, 'Lowercase letters, numbers, hyphen').refine(val => val.length >= 3, 'Slug too short after sanitization'),
+  slug: z.string().min(3).max(40).regex(/^[a-z0-9-]+$/, 'Lowercase letters, numbers, hyphen').transform(sanitizeSlug).refine(val => val.length >= 3, 'Slug too short after sanitization'),
   password: z.string().min(8).max(128).transform(sanitizeText).refine(val => validateNoSqlInjection(val), 'Invalid password format'),
 });
 
@@ -315,7 +315,7 @@ app.put('/api/settings/profile', requireAuth, async (c) => {
   const result = z
     .object({
       displayName: z.string().min(2).max(64).transform(sanitizeDisplayName).refine(val => val.length >= 2, 'Display name too short after sanitization'),
-      slug: z.string().min(3).max(40).transform(sanitizeSlug).regex(/^[a-z0-9-]+$/, 'Lowercase letters, numbers, hyphen').refine(val => val.length >= 3, 'Slug too short after sanitization'),
+      slug: z.string().min(3).max(40).regex(/^[a-z0-9-]+$/, 'Lowercase letters, numbers, hyphen').transform(sanitizeSlug).refine(val => val.length >= 3, 'Slug too short after sanitization'),
     })
     .safeParse(await c.req.json());
   if (!result.success) {

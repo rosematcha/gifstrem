@@ -47,7 +47,7 @@ const LoginPage = () => {
           <input
             type="text"
             className="mt-1 w-full rounded-btn border border-slate bg-graphite p-2 text-white placeholder-dimGray lowercase focus:border-violet focus:outline-none"
-            placeholder="cinappses"
+            placeholder=""
             value={form.slug}
             onChange={(event) => {
               const sanitized = sanitizeSlug(event.target.value.toLowerCase());
