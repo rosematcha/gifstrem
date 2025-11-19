@@ -77,10 +77,16 @@ const SubmissionPage = () => {
                 const compression = await compressGifToLimit(file, MAX_GIF_SIZE_BYTES);
                 fileToUpload = compression.file;
                 setFile(fileToUpload);
-                setCompressionNotice(`Compressed from ${formatBytes(compression.beforeBytes)} to ${formatBytes(compression.afterBytes)} before upload.`);
+                const strategySuffix = compression.lastPresetDescription
+                    ? ` using ${compression.lastPresetDescription}`
+                    : '';
+                setCompressionNotice(`Compressed from ${formatBytes(compression.beforeBytes)} to ${formatBytes(compression.afterBytes)}${strategySuffix}`);
                 if (fileToUpload.size > MAX_GIF_SIZE_BYTES) {
                     setStatus('error');
-                    setError('Even after compression the GIF is still above 2MB. Please trim frames or reduce dimensions.');
+                    const lastStrategy = compression.lastPresetDescription
+                        ? ` (last attempt: ${compression.lastPresetDescription})`
+                        : '';
+                    setError(`We tried ${compression.attempts} compression strategies${lastStrategy}, but the GIF is still ${formatBytes(fileToUpload.size)}. Please trim frames or reduce dimensions.`);
                     return;
                 }
             }
