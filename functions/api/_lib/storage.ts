@@ -52,8 +52,9 @@ export async function saveGifToR2(env: GifstremBindings, file: File, slug: strin
   // Upload the sanitized data directly as a stream
   await env.GIF_BUCKET.put(key, sanitizedData, { httpMetadata });
   
-  const base = env.R2_PUBLIC_BASE_URL?.replace(/\/$/, '');
-  const url = base ? `${base}/${key}` : key;
+  const base =
+    (env.R2_PUBLIC_BASE_URL ?? 'https://r2.gifstrem.com').replace(/\/$/, '');
+  const url = `${base}/${key}`;
   
   return { 
     key, 

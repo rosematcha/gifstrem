@@ -6,8 +6,9 @@ import LoginPage from './LoginPage';
 import SignupPage from './SignupPage';
 import DashboardPage from './DashboardPage';
 import OverlayPage from './OverlayPage';
+import AccountSettingsPage from './AccountSettingsPage';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 const App = () => {
-    return (_jsxs(Routes, { children: [_jsx(Route, { path: "/", element: _jsx(LandingPage, {}) }), _jsx(Route, { path: "/auth/login", element: _jsx(LoginPage, {}) }), _jsx(Route, { path: "/auth/signup", element: _jsx(SignupPage, {}) }), _jsx(Route, { path: "/dashboard", element: _jsx(ProtectedRoute, { children: _jsx(DashboardPage, {}) }) }), _jsx(Route, { path: "/overlay", element: _jsx(OverlayPage, {}) }), _jsx(Route, { path: "/:slug", element: _jsx(SubmissionPage, {}) })] }));
+    return (_jsxs(Routes, { children: [_jsx(Route, { path: "/", element: _jsx(LandingPage, {}) }), _jsx(Route, { path: "/auth/login", element: _jsx(LoginPage, {}) }), _jsx(Route, { path: "/auth/signup", element: _jsx(SignupPage, {}) }), _jsx(Route, { path: "/dashboard", element: _jsx(ProtectedRoute, { children: _jsx(DashboardPage, {}) }) }), _jsx(Route, { path: "/settings", element: _jsx(ProtectedRoute, { children: _jsx(AccountSettingsPage, {}) }) }), _jsx(Route, { path: "/overlay", element: _jsx(OverlayPage, {}) }), _jsx(Route, { path: "/:slug", element: _jsx(SubmissionPage, {}) })] }));
 };
 export default App;

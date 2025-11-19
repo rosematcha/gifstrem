@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import type { Streamer, Submission } from '../types';
+import type { SafeZone, Streamer, Submission } from '../types';
 import { clearToken } from '../lib/auth';
 import { Link, useNavigate } from 'react-router-dom';
 import { SafeZoneEditor } from '../components/SafeZoneEditor';
@@ -15,6 +15,14 @@ const RESOLUTION_SPECS = {
 type ResolutionOption = keyof typeof RESOLUTION_SPECS | 'custom';
 const DEFAULT_RESOLUTION: ResolutionOption = '1080p';
 const RESOLUTION_OPTIONS: ResolutionOption[] = ['720p', '1080p', '2160p', 'custom'];
+const MAX_SAFE_ZONES = 6;
+
+const createDefaultZone = (spec: { width: number; height: number }): SafeZone => ({
+  x: Math.round(spec.width * 0.05),
+  y: Math.round(spec.height * 0.05),
+  width: Math.round(spec.width * 0.6),
+  height: Math.round(spec.height * 0.6),
+});
 
 const DashboardPage = () => {
   const queryClient = useQueryClient();
@@ -79,12 +87,8 @@ const DashboardPage = () => {
     enabled: Boolean(userData),
   });
 
-  const [zoneForm, setZoneForm] = useState<{ x: number; y: number; width: number; height: number }>(() => ({
-    x: 80,
-    y: 80,
-    width: 960,
-    height: 540,
-  }));
+  const [zones, setZones] = useState<SafeZone[]>(() => [createDefaultZone(RESOLUTION_SPECS['1080p'])]);
+  const [activeZoneIndex, setActiveZoneIndex] = useState(0);
 
   const currentResolutionSpec = useMemo(
     () => (activeResolution === 'custom' ? customResolution : RESOLUTION_SPECS[activeResolution]),
@@ -95,19 +99,23 @@ const DashboardPage = () => {
     if (!userData) return;
     const settings = userData.settings;
     const key = settings?.safeZones?.[activeResolution];
-    if (key) {
-      setZoneForm(key.zone);
+    const legacyZone = key ? (key as { zone?: SafeZone }).zone : undefined;
+    const keyZones =
+      key && Array.isArray(key.zones) && key.zones.length > 0
+        ? key.zones
+        : legacyZone
+          ? [legacyZone]
+          : null;
+    if (key && keyZones) {
+      setZones(keyZones.map((zone) => ({ ...zone })));
+      setActiveZoneIndex((prev) => Math.min(prev, keyZones.length - 1));
       setSafeZoneEnabled(key.enabled ?? true);
-    } else {
-      const spec = currentResolutionSpec;
-      setZoneForm({
-        x: Math.round(spec.width * 0.05),
-        y: Math.round(spec.height * 0.05),
-        width: Math.round(spec.width * 0.6),
-        height: Math.round(spec.height * 0.6),
-      });
-      setSafeZoneEnabled(true);
+      return;
     }
+    const spec = currentResolutionSpec;
+    setZones([createDefaultZone(spec)]);
+    setActiveZoneIndex(0);
+    setSafeZoneEnabled(true);
   }, [activeResolution, currentResolutionSpec, userData]);
 
   const reviewMutation = useMutation({
@@ -126,7 +134,7 @@ const DashboardPage = () => {
       const payload = {
         resolution: activeResolution,
         size: currentResolutionSpec,
-        zone: zoneForm,
+        zones,
         enabled: safeZoneEnabled,
       };
       const response = await api.put<{ user: Streamer }>('/settings/safe-zone', payload);
@@ -156,6 +164,36 @@ const DashboardPage = () => {
       queryClient.setQueryData(['me'], user);
     },
   });
+
+  const handleZoneChange = (index: number, zone: SafeZone) => {
+    setZones((prev) => prev.map((entry, idx) => (idx === index ? zone : entry)));
+  };
+
+  const handleAddZone = () => {
+    setZones((prev) => {
+      if (prev.length >= MAX_SAFE_ZONES) return prev;
+      const next = [...prev, createDefaultZone(currentResolutionSpec)];
+      setActiveZoneIndex(next.length - 1);
+      return next;
+    });
+  };
+
+  const handleRemoveZone = (index: number) => {
+    setZones((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((_, idx) => idx !== index);
+      setActiveZoneIndex((current) => {
+        if (current === index) {
+          return Math.max(0, Math.min(index - 1, next.length - 1));
+        }
+        if (current > index) {
+          return Math.max(0, current - 1);
+        }
+        return Math.min(current, next.length - 1);
+      });
+      return next;
+    });
+  };
 
   const overlayUrl = useMemo(() => {
     if (!userData) return '';
@@ -405,9 +443,58 @@ const DashboardPage = () => {
                   </button>
                 </div>
               )}
-              <div className="mt-4">
+              <div className="mt-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex flex-wrap gap-2">
+                    {zones.map((_, index) => {
+                      const isActive = index === activeZoneIndex;
+                      return (
+                        <div
+                          key={`zone-chip-${index}`}
+                          className={`flex items-center gap-1 rounded-btn border px-2 py-1 ${
+                            isActive ? 'border-violet bg-violet/10 text-white' : 'border-slate text-coolGray'
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setActiveZoneIndex(index)}
+                            className="font-semibold"
+                          >
+                            Zone {index + 1}
+                          </button>
+                          {zones.length > 1 && (
+                            <button
+                              type="button"
+                              className="ml-1 text-xs text-dimGray hover:text-coral"
+                              aria-label={`Remove zone ${index + 1}`}
+                              onClick={() => handleRemoveZone(index)}
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {zones.length < MAX_SAFE_ZONES && (
+                    <button
+                      type="button"
+                      onClick={handleAddZone}
+                      disabled={!safeZoneEnabled}
+                      className="rounded-btn border border-dashed border-slate px-3 py-1 font-semibold text-coolGray hover:border-violet hover:text-white disabled:opacity-50"
+                    >
+                      + Add zone
+                    </button>
+                  )}
+                </div>
                 {safeZoneEnabled ? (
-                  <SafeZoneEditor resolution={currentResolutionSpec} zone={zoneForm} onChange={setZoneForm} />
+                  <SafeZoneEditor
+                    resolution={currentResolutionSpec}
+                    zones={zones}
+                    activeIndex={activeZoneIndex}
+                    onZoneChange={handleZoneChange}
+                    onSelectZone={setActiveZoneIndex}
+                  />
                 ) : (
                   <p className="rounded-btn border border-cyan/40 bg-cyan/10 p-4 text-sm text-coolGray">
                     Safe zone is disabled for this resolution. Enable it above if you want to edit the protected area.
@@ -415,14 +502,15 @@ const DashboardPage = () => {
                 )}
               </div>
               <p className="mt-2 text-xs text-dimGray">
-                Drag the green box to keep your drawing area clear. Corner handles resize it.
+                Drag the highlighted boxes to keep your drawing area clear. Corner handles resize each safe zone, and you
+                can add multiple boxes to protect different parts of your overlay.
               </p>
               <button
                 className="mt-4 w-full rounded-btn bg-violet py-[10px] text-sm font-semibold hover:bg-softViolet hover:-translate-y-[1px] active:bg-deepViolet active:translate-y-0 disabled:opacity-60"
                 onClick={() => safeZoneMutation.mutate()}
                 disabled={safeZoneMutation.isPending}
               >
-                {safeZoneMutation.isPending ? 'Saving…' : 'Save safe zone'}
+                {safeZoneMutation.isPending ? 'Saving…' : 'Save safe zones'}
               </button>
             </div>
 

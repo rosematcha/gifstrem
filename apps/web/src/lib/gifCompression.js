@@ -20,9 +20,7 @@ export async function compressGifToLimit(file, limitBytes) {
         attempts += 1;
         const [output] = await gifsicle.run({
             input: [{ file: workingFile, name: GIFSICLE_INPUT_NAME }],
-            command: [
-                `-O3 --lossy=${preset.lossy} --colors ${preset.colors} ${GIFSICLE_INPUT_NAME} -o /out/${GIFSICLE_OUTPUT_NAME}`,
-            ],
+            command: buildCommand(preset),
             isStrict: true,
         });
         if (!output) {
@@ -51,4 +49,15 @@ export async function compressGifToLimit(file, limitBytes) {
 async function renameOutput(output, targetName) {
     const buffer = await output.arrayBuffer();
     return new File([buffer], targetName, { type: 'image/gif', lastModified: Date.now() });
+}
+function buildCommand(preset) {
+    return [
+        '-O3',
+        `--lossy=${preset.lossy}`,
+        '--colors',
+        `${preset.colors}`,
+        GIFSICLE_INPUT_NAME,
+        '-o',
+        `/out/${GIFSICLE_OUTPUT_NAME}`,
+    ];
 }

@@ -6,9 +6,10 @@ import { z } from 'zod';
 import { createRepositories, Repositories } from './_lib/repositories';
 import { serializeSubmission, serializeUser } from './_lib/serializers';
 import { createOverlayToken, generateAccessToken, hashPassword, verifyAccessToken, verifyPassword } from './_lib/security';
-import type { GifstremBindings, SettingsShape, UserRow } from './_lib/types';
+import type { GifstremBindings, UserRow } from './_lib/types';
 import { saveGifToR2, deleteGifFromR2 } from './_lib/storage';
 import { sanitizeDisplayName, sanitizeSlug, sanitizeMessage, sanitizeText, validateNoSqlInjection } from './_lib/sanitize';
+import { ensureSettings } from './_lib/settings';
 
 type AppBindings = GifstremBindings;
 type AppVariables = {
@@ -35,20 +36,28 @@ const loginSchema = z.object({
   password: z.string().transform(sanitizeText),
 });
 
-const safeZoneSchema = z.object({
-  resolution: z.enum(['720p', '1080p', '2160p', 'custom']),
-  size: z.object({
-    width: z.number().min(100),
-    height: z.number().min(100),
-  }),
-  zone: z.object({
-    x: z.number().min(0),
-    y: z.number().min(0),
-    width: z.number().min(10),
-    height: z.number().min(10),
-  }),
-  enabled: z.boolean().optional(),
+const safeZoneBoundsSchema = z.object({
+  x: z.number().min(0),
+  y: z.number().min(0),
+  width: z.number().min(10),
+  height: z.number().min(10),
 });
+
+const safeZoneSchema = z
+  .object({
+    resolution: z.enum(['720p', '1080p', '2160p', 'custom']),
+    size: z.object({
+      width: z.number().min(100),
+      height: z.number().min(100),
+    }),
+    zones: z.array(safeZoneBoundsSchema).min(1).max(6).optional(),
+    zone: safeZoneBoundsSchema.optional(),
+    enabled: z.boolean().optional(),
+  })
+  .refine(
+    (payload) => Boolean(payload.zone || (payload.zones && payload.zones.length > 0)),
+    { message: 'At least one safe zone is required', path: ['zones'] },
+  );
 
 const submissionSchema = z.object({
   slug: z.string().min(3).transform(sanitizeSlug),
@@ -250,8 +259,9 @@ app.put('/api/settings/safe-zone', requireAuth, async (c) => {
   }
   const user = c.get('user')!;
   const settings = ensureSettings(user.settings);
+  const zones = result.data.zones ?? (result.data.zone ? [result.data.zone] : []);
   settings.safeZones[result.data.resolution] = {
-    zone: result.data.zone,
+    zones,
     size: result.data.size,
     enabled: result.data.enabled ?? true,
   };
@@ -387,21 +397,6 @@ async function requireAuth(
   } catch (error) {
     return c.json({ error: 'Invalid token' }, 401);
   }
-}
-
-function ensureSettings(payload: string): SettingsShape {
-  try {
-    const parsed = JSON.parse(payload) as SettingsShape;
-    if (parsed && parsed.safeZones) {
-      return parsed;
-    }
-  } catch (error) {
-    // ignore invalid JSON
-  }
-  return {
-    safeZones: {},
-    animation: { type: 'pop', durationMs: 600 },
-  };
 }
 
 async function removeExpiredForStreamer(env: AppBindings, repos: Repositories, streamerId: string) {

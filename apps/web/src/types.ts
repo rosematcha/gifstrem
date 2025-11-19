@@ -6,7 +6,7 @@ export type SafeZone = {
 };
 
 export type ResolutionSafeZone = {
-  zone: SafeZone;
+  zones: SafeZone[];
   size: { width: number; height: number };
   enabled?: boolean;
 };

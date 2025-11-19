@@ -1,3 +1,4 @@
+import { ensureSettings } from './settings';
 import { SubmissionRow, UserRow } from './types';
 
 export function serializeUser(user: UserRow) {
@@ -7,7 +8,7 @@ export function serializeUser(user: UserRow) {
     displayName: user.display_name,
     slug: user.slug,
     overlayToken: user.overlay_token,
-    settings: safeParse(user.settings),
+    settings: ensureSettings(user.settings),
     createdAt: user.created_at,
     updatedAt: user.updated_at,
   };

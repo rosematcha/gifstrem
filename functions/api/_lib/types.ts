@@ -36,15 +36,21 @@ export type SubmissionRow = {
   layout: string | null;
 };
 
+export type SafeZone = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type ResolutionSafeZone = {
+  zones: SafeZone[];
+  size: { width: number; height: number };
+  enabled?: boolean;
+};
+
 export type SettingsShape = {
-  safeZones: Record<
-    string,
-    {
-      zone: { x: number; y: number; width: number; height: number };
-      size: { width: number; height: number };
-      enabled?: boolean;
-    }
-  >;
+  safeZones: Record<string, ResolutionSafeZone>;
   animation: { type: string; durationMs: number };
   showSafeZoneOverlay?: boolean;
   preferredResolution?: '720p' | '1080p' | '2160p' | 'custom';

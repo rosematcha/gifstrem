@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import type { Streamer, Submission } from '../types';
+import type { ResolutionSafeZone, SafeZone, Streamer, Submission } from '../types';
 
 const RESOLUTION_SPECS = {
   '720p': { width: 1280, height: 720 },
@@ -76,26 +76,37 @@ const OverlayPage = () => {
   }, []);
 
   const safeZoneSetting = query.data?.streamer.settings?.safeZones?.[resolution];
-  const safeZoneBounds =
-    safeZoneSetting ??
-    ({
-      zone: {
-        x: canvasSize.width * 0.25,
-        y: canvasSize.height * 0.2,
-        width: canvasSize.width * 0.5,
-        height: canvasSize.height * 0.6,
-      },
-      size: canvasSize,
-      enabled: true,
-    } as const);
-  const safeZoneEnabled = safeZoneSetting?.enabled ?? true;
-  const effectiveSafeZone = safeZoneEnabled ? safeZoneBounds.zone : EMPTY_SAFE_ZONE;
+  const safeZoneConfig = useMemo<ResolutionSafeZone>(() => {
+    const fallbackZone: SafeZone = {
+      x: Math.round(canvasSize.width * 0.25),
+      y: Math.round(canvasSize.height * 0.2),
+      width: Math.round(canvasSize.width * 0.5),
+      height: Math.round(canvasSize.height * 0.6),
+    };
+    const legacyZone = safeZoneSetting ? (safeZoneSetting as { zone?: SafeZone }).zone : undefined;
+    const normalizedZones =
+      safeZoneSetting && Array.isArray(safeZoneSetting.zones) && safeZoneSetting.zones.length > 0
+        ? safeZoneSetting.zones
+        : legacyZone
+          ? [legacyZone]
+          : undefined;
+    if (safeZoneSetting && normalizedZones) {
+      return {
+        zones: normalizedZones.slice(),
+        size: safeZoneSetting.size ?? canvasSize,
+        enabled: safeZoneSetting.enabled ?? true,
+      };
+    }
+    return { zones: [fallbackZone], size: canvasSize, enabled: true };
+  }, [canvasSize, safeZoneSetting]);
+  const safeZoneEnabled = safeZoneSetting?.enabled ?? safeZoneConfig.enabled ?? true;
+  const effectiveSafeZones = safeZoneEnabled ? safeZoneConfig.zones : [];
   const showSafeZone =
     safeZoneEnabled && (query.data?.streamer.settings?.showSafeZoneOverlay ?? false);
 
   const layout = useMemo(() => {
     if (!query.data) return [];
-    const pockets = buildPockets(canvasSize, effectiveSafeZone);
+    const pockets = buildPockets(canvasSize, effectiveSafeZones);
     const densityMap = createDensityMap(canvasSize);
     const shortestSide = Math.min(canvasSize.width, canvasSize.height);
     const minStickerSize = Math.max(72, Math.round(shortestSide * 0.07));
@@ -122,9 +133,9 @@ const OverlayPage = () => {
         canvasSize,
       );
       if (safeZoneEnabled) {
-        rect = keepOutsideSafeZone(rect, effectiveSafeZone, canvasSize);
+        rect = keepOutsideSafeZones(rect, effectiveSafeZones, canvasSize);
       }
-      rect = resolveOverlaps(rect, placements, effectiveSafeZone, canvasSize, seedKey, safeZoneEnabled);
+      rect = resolveOverlaps(rect, placements, effectiveSafeZones, canvasSize, seedKey, safeZoneEnabled);
       placements.push(rect);
       pocket.usage += 1;
       pocket.usedArea += rect.size * rect.size;
@@ -150,15 +161,7 @@ const OverlayPage = () => {
     });
 
     return items;
-  }, [
-    canvasSize,
-    query.data,
-    effectiveSafeZone.height,
-    effectiveSafeZone.width,
-    effectiveSafeZone.x,
-    effectiveSafeZone.y,
-    safeZoneEnabled,
-  ]);
+  }, [canvasSize, query.data, safeZoneEnabled, safeZoneConfig.zones]);
 
   if (!token) {
     return <div className="p-8 text-center text-red-400">Missing overlay token.</div>;
@@ -187,17 +190,19 @@ const OverlayPage = () => {
       style={{ width: canvasSize.width, height: canvasSize.height }}
     >
       <div className="relative h-full w-full bg-transparent">
-        {showSafeZone && (
-          <div
-            className="absolute border-2 border-emerald-400/70 bg-emerald-400/10"
-            style={{
-              left: safeZoneBounds.zone.x,
-              top: safeZoneBounds.zone.y,
-              width: safeZoneBounds.zone.width,
-              height: safeZoneBounds.zone.height,
-            }}
-          />
-        )}
+        {showSafeZone &&
+          safeZoneConfig.zones.map((zone, index) => (
+            <div
+              key={`safe-zone-${index}`}
+              className="absolute border-2 border-emerald-400/70 bg-emerald-400/10"
+              style={{
+                left: zone.x,
+                top: zone.y,
+                width: zone.width,
+                height: zone.height,
+              }}
+            />
+          ))}
         {layout.map((item) => (
           <img
             key={item.id}
@@ -219,146 +224,120 @@ const OverlayPage = () => {
   );
 };
 
-function buildPockets(
-  canvas: { width: number; height: number },
-  safeZone: { x: number; y: number; width: number; height: number },
-): Pocket[] {
+function buildPockets(canvas: { width: number; height: number }, safeZones: SafeZone[]): Pocket[] {
   const margin = 24;
-  const paddedZone = padSafeZone(safeZone, SAFE_ZONE_PADDING, canvas);
-  const usableWidth = Math.max(0, canvas.width - margin * 2);
-  const usableHeight = Math.max(0, canvas.height - margin * 2);
-  const rawPockets: Pocket[] = [];
-  const leftWidth = Math.max(0, paddedZone.x - margin);
-  if (leftWidth > 40) {
-    rawPockets.push(
-      createPocket(
-        'left-strip',
-        { x: margin, y: margin, width: leftWidth, height: usableHeight },
-        Math.max(70, leftWidth - SAFE_ZONE_PADDING / 2),
-        1.15,
-      ),
-    );
-  }
-
-  const rightStart = paddedZone.x + paddedZone.width;
-  const rightWidth = Math.max(0, canvas.width - margin - rightStart);
-  if (rightWidth > 40) {
-    rawPockets.push(
-      createPocket(
-        'right-strip',
-        { x: rightStart, y: margin, width: rightWidth, height: usableHeight },
-        Math.max(70, rightWidth - SAFE_ZONE_PADDING / 2),
-        1.15,
-      ),
-    );
-  }
-
-  const topHeight = Math.max(0, paddedZone.y - margin);
-  if (topHeight > 40) {
-    rawPockets.push(
-      createPocket(
-        'top-band',
-        { x: margin, y: margin, width: usableWidth, height: topHeight },
-        Math.max(70, topHeight - SAFE_ZONE_PADDING / 2),
-        1.1,
-      ),
-    );
-  }
-
-  const bottomStart = paddedZone.y + paddedZone.height;
-  const bottomHeight = Math.max(0, canvas.height - margin - bottomStart);
-  if (bottomHeight > 40) {
-    rawPockets.push(
-      createPocket(
-        'bottom-band',
-        { x: margin, y: bottomStart, width: usableWidth, height: bottomHeight },
-        Math.max(70, bottomHeight - SAFE_ZONE_PADDING / 2),
-        1.1,
-      ),
-    );
-  }
-
-  const cornerWidth = Math.min(leftWidth || usableWidth, Math.max(120, usableWidth / 3));
-  const cornerRightWidth = Math.min(rightWidth || usableWidth, Math.max(120, usableWidth / 3));
-  const cornerHeight = Math.min(topHeight || usableHeight, Math.max(120, usableHeight / 3));
-  const cornerBottomHeight = Math.min(bottomHeight || usableHeight, Math.max(120, usableHeight / 3));
-
-  if (cornerWidth > 60 && cornerHeight > 60) {
-    rawPockets.push(
-      createPocket(
-        'top-left-pocket',
-        { x: margin, y: margin, width: cornerWidth, height: cornerHeight },
-        Math.max(80, Math.min(cornerWidth, cornerHeight) - SAFE_ZONE_PADDING / 2),
-        1.35,
-      ),
-    );
-  }
-
-  if (cornerRightWidth > 60 && cornerHeight > 60) {
-    rawPockets.push(
-      createPocket(
-        'top-right-pocket',
-        {
-          x: Math.max(margin, canvas.width - margin - cornerRightWidth),
-          y: margin,
-          width: cornerRightWidth,
-          height: cornerHeight,
-        },
-        Math.max(80, Math.min(cornerRightWidth, cornerHeight) - SAFE_ZONE_PADDING / 2),
-        1.35,
-      ),
-    );
-  }
-
-  if (cornerWidth > 60 && cornerBottomHeight > 60) {
-    rawPockets.push(
-      createPocket(
-        'bottom-left-pocket',
-        {
-          x: margin,
-          y: Math.max(margin, canvas.height - margin - cornerBottomHeight),
-          width: cornerWidth,
-          height: cornerBottomHeight,
-        },
-        Math.max(80, Math.min(cornerWidth, cornerBottomHeight) - SAFE_ZONE_PADDING / 2),
-        1.35,
-      ),
-    );
-  }
-
-  if (cornerRightWidth > 60 && cornerBottomHeight > 60) {
-    rawPockets.push(
-      createPocket(
-        'bottom-right-pocket',
-        {
-          x: Math.max(margin, canvas.width - margin - cornerRightWidth),
-          y: Math.max(margin, canvas.height - margin - cornerBottomHeight),
-          width: cornerRightWidth,
-          height: cornerBottomHeight,
-        },
-        Math.max(80, Math.min(cornerRightWidth, cornerBottomHeight) - SAFE_ZONE_PADDING / 2),
-        1.35,
-      ),
-    );
-  }
-
-  if (rawPockets.length === 0) {
-    rawPockets.push(
+  const baseRect = {
+    x: margin,
+    y: margin,
+    width: Math.max(0, canvas.width - margin * 2),
+    height: Math.max(0, canvas.height - margin * 2),
+  };
+  if (baseRect.width <= 0 || baseRect.height <= 0) {
+    return [
       createPocket(
         'fallback',
-        {
-          x: margin,
-          y: margin,
-          width: Math.max(80, usableWidth),
-          height: Math.max(80, usableHeight),
-        },
-        Math.max(90, Math.min(usableWidth, usableHeight) - SAFE_ZONE_PADDING),
+        { x: 0, y: 0, width: canvas.width, height: canvas.height },
+        Math.max(80, Math.min(canvas.width, canvas.height)),
+        1,
       ),
-    );
+    ];
+  }
+  const paddedZones = safeZones.map((zone) => padSafeZone(zone, SAFE_ZONE_PADDING, canvas));
+  let availableRects = [baseRect];
+  for (const zone of paddedZones) {
+    availableRects = availableRects.flatMap((rect) => subtractRect(rect, zone));
+  }
+  if (availableRects.length === 0) {
+    availableRects = [baseRect];
+  }
+  const pockets = availableRects
+    .filter((rect) => rect.width > 32 && rect.height > 32)
+    .map((rect, index) => {
+      const area = rect.width * rect.height;
+      const priorityBase = Math.min(1.4, 0.9 + area / Math.max(1, canvas.width * canvas.height));
+      return createPocket(
+        `pocket-${index}`,
+        rect,
+        Math.max(70, Math.min(rect.width, rect.height)),
+        priorityBase,
+      );
+    })
+    .flatMap((pocket) => subdividePocket(pocket));
+  if (pockets.length === 0) {
+    return [
+      createPocket(
+        'fallback',
+        baseRect,
+        Math.max(90, Math.min(baseRect.width, baseRect.height)),
+        1,
+      ),
+    ];
+  }
+  return pockets;
+}
+
+function subtractRect(
+  source: { x: number; y: number; width: number; height: number },
+  cut: { x: number; y: number; width: number; height: number },
+) {
+  const intersection = intersectRect(source, cut);
+  if (!intersection) {
+    return [source];
+  }
+  const remainder: { x: number; y: number; width: number; height: number }[] = [];
+  const sourceRight = source.x + source.width;
+  const sourceBottom = source.y + source.height;
+  const intersectRight = intersection.x + intersection.width;
+  const intersectBottom = intersection.y + intersection.height;
+
+  if (intersection.y > source.y) {
+    remainder.push({
+      x: source.x,
+      y: source.y,
+      width: source.width,
+      height: intersection.y - source.y,
+    });
+  }
+  if (intersectBottom < sourceBottom) {
+    remainder.push({
+      x: source.x,
+      y: intersectBottom,
+      width: source.width,
+      height: sourceBottom - intersectBottom,
+    });
+  }
+  if (intersection.x > source.x) {
+    remainder.push({
+      x: source.x,
+      y: intersection.y,
+      width: intersection.x - source.x,
+      height: intersection.height,
+    });
+  }
+  if (intersectRight < sourceRight) {
+    remainder.push({
+      x: intersectRight,
+      y: intersection.y,
+      width: sourceRight - intersectRight,
+      height: intersection.height,
+    });
   }
 
-  const segmented = rawPockets.flatMap((pocket) => subdividePocket(pocket));
-  return segmented.length > 0 ? segmented : rawPockets;
+  return remainder.filter((rect) => rect.width > 1 && rect.height > 1);
+}
+
+function intersectRect(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+) {
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.width, b.x + b.width);
+  const y2 = Math.min(a.y + a.height, b.y + b.height);
+  if (x2 <= x1 || y2 <= y1) {
+    return null;
+  }
+  return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
 }
 
 function createDensityMap(canvas: { width: number; height: number }): DensityMap {
@@ -476,7 +455,7 @@ function subdividePocket(pocket: Pocket) {
   return segments.length > 0 ? segments : [pocket];
 }
 
-function keepOutsideSafeZone(
+function keepOutsideSingleZone(
   rect: { x: number; y: number; size: number },
   safeZone: { x: number; y: number; width: number; height: number },
   canvas: { width: number; height: number },
@@ -568,7 +547,7 @@ function keepOutsideSafeZone(
     );
   }
 
-  return keepOutsideSafeZone(
+  return keepOutsideSingleZone(
     {
       x: candidate.x,
       y: candidate.y,
@@ -577,6 +556,35 @@ function keepOutsideSafeZone(
     safeZone,
     canvas,
   );
+}
+
+function keepOutsideSafeZones(
+  rect: { x: number; y: number; size: number },
+  safeZones: SafeZone[],
+  canvas: { width: number; height: number },
+) {
+  if (safeZones.length === 0) {
+    return clampRect(rect, canvas);
+  }
+  let candidate = clampRect(rect, canvas);
+  const paddedZones = safeZones.map((zone) => padSafeZone(zone, SAFE_ZONE_PADDING, canvas));
+  for (let attempt = 0; attempt < Math.max(1, paddedZones.length) * 2; attempt += 1) {
+    let moved = false;
+    for (const zone of paddedZones) {
+      const next = keepOutsideSingleZone(candidate, zone, canvas);
+      if (next.x !== candidate.x || next.y !== candidate.y) {
+        moved = true;
+      }
+      candidate = next;
+    }
+    if (!paddedZones.some((zone) => rectsOverlap(candidate, zone))) {
+      return candidate;
+    }
+    if (!moved) {
+      break;
+    }
+  }
+  return candidate;
 }
 
 function selectPocket(pockets: Pocket[], index: number, seed: string, density: DensityMap) {
@@ -637,7 +645,7 @@ const MAX_OVERLAP_RATIO = 0.08;
 function resolveOverlaps(
   rect: { x: number; y: number; size: number },
   existing: { x: number; y: number; size: number }[],
-  safeZone: { x: number; y: number; width: number; height: number },
+  safeZones: SafeZone[],
   canvas: { width: number; height: number },
   seed = '',
   respectSafeZone = true,
@@ -667,17 +675,17 @@ function resolveOverlaps(
         {
           x: rect.x + offset.dx,
           y: rect.y + offset.dy,
-          size,
-        },
-        canvas,
-      );
-      if (respectSafeZone) {
-        candidate = keepOutsideSafeZone(candidate, safeZone, canvas);
-      }
-      const score = overlapScore(candidate, existing);
-      if (score < bestScore) {
-        bestScore = score;
-        bestCandidate = candidate;
+        size,
+      },
+      canvas,
+    );
+    if (respectSafeZone) {
+      candidate = keepOutsideSafeZones(candidate, safeZones, canvas);
+    }
+    const score = overlapScore(candidate, existing);
+    if (score < bestScore) {
+      bestScore = score;
+      bestCandidate = candidate;
       }
       if (score <= MAX_OVERLAP_RATIO) {
         return candidate;
@@ -687,7 +695,7 @@ function resolveOverlaps(
     size = Math.max(60, size * 0.88);
   }
 
-  return findLowOverlapPlacement(bestCandidate, existing, safeZone, canvas, seed, respectSafeZone);
+  return findLowOverlapPlacement(bestCandidate, existing, safeZones, canvas, seed, respectSafeZone);
 }
 
 function clampRect(rect: { x: number; y: number; size: number }, canvas: { width: number; height: number }) {
@@ -739,7 +747,7 @@ function overlapScore(candidate: { x: number; y: number; size: number }, existin
 function findLowOverlapPlacement(
   seedCandidate: { x: number; y: number; size: number },
   existing: { x: number; y: number; size: number }[],
-  safeZone: { x: number; y: number; width: number; height: number },
+  safeZones: SafeZone[],
   canvas: { width: number; height: number },
   seed: string,
   respectSafeZone = true,
@@ -759,7 +767,7 @@ function findLowOverlapPlacement(
     const randomRow = randomFromHash(`${offsetSeed}-y`, 0, heightLimit);
     let candidate = clampRect({ x: randomColumn, y: randomRow, size: seedCandidate.size }, canvas);
     if (respectSafeZone) {
-      candidate = keepOutsideSafeZone(candidate, safeZone, canvas);
+      candidate = keepOutsideSafeZones(candidate, safeZones, canvas);
     }
     const score = overlapScore(candidate, existing);
     if (score < bestScore) {

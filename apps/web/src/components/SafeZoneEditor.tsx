@@ -3,8 +3,10 @@ import type { SafeZone } from '../types';
 
 type Props = {
   resolution: { width: number; height: number };
-  zone: SafeZone;
-  onChange: (zone: SafeZone) => void;
+  zones: SafeZone[];
+  activeIndex: number;
+  onZoneChange: (index: number, zone: SafeZone) => void;
+  onSelectZone?: (index: number) => void;
 };
 
 type Handle =
@@ -21,7 +23,7 @@ const clamp = (value: number, min: number, max: number) => {
   return Math.min(Math.max(value, min), max);
 };
 
-export const SafeZoneEditor = ({ resolution, zone, onChange }: Props) => {
+export const SafeZoneEditor = ({ resolution, zones, activeIndex, onZoneChange, onSelectZone }: Props) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(320);
   const activeDrag = useRef<{
@@ -29,6 +31,7 @@ export const SafeZoneEditor = ({ resolution, zone, onChange }: Props) => {
     startX: number;
     startY: number;
     zone: SafeZone;
+    index: number;
     target: EventTarget | null;
   } | null>(null);
 
@@ -49,6 +52,10 @@ export const SafeZoneEditor = ({ resolution, zone, onChange }: Props) => {
 
   const scale = containerWidth / resolution.width;
   const containerHeight = resolution.height * scale;
+  const activeZone = zones[activeIndex] ?? zones[0];
+  if (!activeZone) {
+    return null;
+  }
 
   const finishDrag = useCallback(() => {
     activeDrag.current = null;
@@ -57,7 +64,7 @@ export const SafeZoneEditor = ({ resolution, zone, onChange }: Props) => {
   const handlePointerMove = useCallback(
     (event: PointerEvent) => {
       if (!activeDrag.current) return;
-      const { handle, startX, startY, zone: initial } = activeDrag.current;
+      const { handle, startX, startY, zone: initial, index } = activeDrag.current;
       const deltaXUnits = (event.clientX - startX) / scale;
       const deltaYUnits = (event.clientY - startY) / scale;
 
@@ -141,28 +148,31 @@ export const SafeZoneEditor = ({ resolution, zone, onChange }: Props) => {
           break;
       }
 
-      onChange({
+      onZoneChange(index, {
         x: Math.round(next.x),
         y: Math.round(next.y),
         width: Math.round(next.width),
         height: Math.round(next.height),
       });
     },
-    [onChange, resolution.height, resolution.width, scale],
+    [onZoneChange, resolution.height, resolution.width, scale],
   );
 
-  const startDrag = (handle: Handle) => (event: React.PointerEvent<HTMLElement>) => {
+  const startDrag = (index: number, handle: Handle) => (event: React.PointerEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
     (event.currentTarget as HTMLElement)?.setPointerCapture(event.pointerId);
+    onSelectZone?.(index);
     activeDrag.current = {
       handle,
       startX: event.clientX,
       startY: event.clientY,
-      zone,
+      zone: zones[index] ?? zones[0],
+      index,
       target: event.currentTarget,
     };
   };
+
   useEffect(() => {
     const move = (event: PointerEvent) => {
       if (!activeDrag.current) return;
@@ -198,32 +208,43 @@ export const SafeZoneEditor = ({ resolution, zone, onChange }: Props) => {
         }}
       >
         <div className="absolute inset-0 bg-[radial-gradient(circle,_rgba(148,163,184,0.2)_1px,_transparent_1px)] [background-size:16px_16px]" />
-        <div
-          className="absolute cursor-move select-none rounded-lg border-2 border-emerald-400/80 bg-emerald-400/10 shadow-lg shadow-emerald-900/30 transition"
-          style={{
-            left: zone.x * scale,
-            top: zone.y * scale,
-            width: Math.max(zone.width * scale, MIN_WIDTH * scale * 0.5),
-            height: Math.max(zone.height * scale, MIN_HEIGHT * scale * 0.5),
-          }}
-          onPointerDown={startDrag('move')}
-        >
-          {(['tl', 'tr', 'bl', 'br'] as const).map((corner) => (
-            <span
-              key={corner}
-              onPointerDown={startDrag(`resize-${corner}` as Handle)}
-              className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full border border-white bg-emerald-300"
+        {zones.map((zone, index) => {
+          const isActive = index === activeIndex;
+          return (
+            <div
+              key={`zone-${index}`}
+              className={`absolute select-none rounded-lg border-2 ${
+                isActive
+                  ? 'cursor-move border-emerald-400/80 bg-emerald-400/10 shadow-lg shadow-emerald-900/30'
+                  : 'border-white/30 bg-white/5'
+              } transition`}
               style={{
-                left: corner.includes('l') ? 0 : '100%',
-                top: corner.includes('t') ? 0 : '100%',
+                left: zone.x * scale,
+                top: zone.y * scale,
+                width: Math.max(zone.width * scale, MIN_WIDTH * scale * 0.5),
+                height: Math.max(zone.height * scale, MIN_HEIGHT * scale * 0.5),
               }}
-            />
-          ))}
-        </div>
+              onPointerDown={startDrag(index, 'move')}
+            >
+              {isActive &&
+                (['tl', 'tr', 'bl', 'br'] as const).map((corner) => (
+                  <span
+                    key={corner}
+                    onPointerDown={startDrag(index, `resize-${corner}` as Handle)}
+                    className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full border border-white bg-emerald-300"
+                    style={{
+                      left: corner.includes('l') ? 0 : '100%',
+                      top: corner.includes('t') ? 0 : '100%',
+                    }}
+                  />
+                ))}
+            </div>
+          );
+        })}
       </div>
       <div className="text-xs text-slate-400">
-        Position: ({Math.round(zone.x)}, {Math.round(zone.y)}) px — Size:{' '}
-        {Math.round(zone.width)} × {Math.round(zone.height)} px
+        Zone {activeIndex + 1}: Position ({Math.round(activeZone.x)}, {Math.round(activeZone.y)}) px - Size{' '}
+        {Math.round(activeZone.width)} x {Math.round(activeZone.height)} px
       </div>
     </div>
   );
