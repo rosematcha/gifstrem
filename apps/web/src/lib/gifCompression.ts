@@ -2,6 +2,8 @@ import gifsicle from 'gifsicle-wasm-browser';
 
 const GIFSICLE_INPUT_NAME = 'input.gif';
 const GIFSICLE_OUTPUT_NAME = 'compressed.gif';
+const GIFSICLE_INPUT_PATH = `/${GIFSICLE_INPUT_NAME}`;
+const GIFSICLE_OUTPUT_PATH = `/out/${GIFSICLE_OUTPUT_NAME}`;
 
 const LOSSY_STEPS = [40, 80, 120, 160, 200, 240, 280, 320];
 const COLOR_STEPS = [256, 224, 196, 160, 128, 96, 80, 64];
@@ -135,7 +137,7 @@ function buildCommand(preset: CompressionPreset) {
     command.push('--resize-fit', `${preset.resizeTo}x${preset.resizeTo}`);
   }
 
-  command.push(GIFSICLE_INPUT_NAME, '-o', `/out/${GIFSICLE_OUTPUT_NAME}`);
+  command.push(GIFSICLE_INPUT_PATH, '-o', GIFSICLE_OUTPUT_PATH);
   return command;
 }
 
@@ -212,4 +214,4 @@ function isGifSignature(bytes: Uint8Array) {
   const signature = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]);
   return signature === 'GIF87a' || signature === 'GIF89a';
 }
-const GIFSICLE_COMMON_FLAGS = ['-O3', '--no-warnings'];
+const GIFSICLE_COMMON_FLAGS = ['-O3', '--no-warnings', '--no-interlace'];
