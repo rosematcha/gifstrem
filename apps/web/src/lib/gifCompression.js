@@ -1,4 +1,7 @@
 import gifsicle from 'gifsicle-wasm-browser';
+import { decompressFrames, parseGIF } from 'gifuct-js';
+// @ts-expect-error gif-encoder-2 has no types
+import GIFEncoder from 'gif-encoder-2';
 const GIFSICLE_INPUT_NAME = 'input.gif';
 const GIFSICLE_OUTPUT_NAME = 'compressed.gif';
 const GIFSICLE_INPUT_PATH = `/${GIFSICLE_INPUT_NAME}`;
@@ -6,6 +9,8 @@ const GIFSICLE_OUTPUT_PATH = `/out/${GIFSICLE_OUTPUT_NAME}`;
 const LOSSY_STEPS = [40, 80, 120, 160, 200, 240, 280, 320];
 const COLOR_STEPS = [256, 224, 196, 160, 128, 96, 80, 64];
 const RESIZE_BUCKETS = [768, 640, 512, 384];
+const FALLBACK_MIN_DIMENSION = 192;
+const FALLBACK_SHRINK_STEP = 0.75;
 /**
  * Tries increasingly aggressive presets (optimize, lossy palettes, and resize)
  * until the GIF is below the target size or we run out of presets. Returns the
@@ -62,7 +67,25 @@ export async function compressGifToLimit(file, limitBytes) {
         }
     }
     if (!history.length || history.every((entry) => entry.error)) {
-        throw new Error(lastError ?? 'Compression failed: no successful preset produced an output.');
+        // Attempt a canvas-based fallback if gifsicle cannot produce output in this environment.
+        try {
+            const fallback = await fallbackCompressGif(workingFile, limitBytes);
+            history.push({ preset: { description: 'Fallback canvas encoder' }, bytes: fallback.size });
+            return {
+                file: fallback,
+                beforeBytes,
+                afterBytes: fallback.size,
+                attempts: attempts + 1,
+                exhaustedPresets: false,
+                history,
+                metadata,
+                lastPresetDescription: 'Fallback canvas encoder',
+            };
+        }
+        catch (fallbackError) {
+            const fallbackReason = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+            throw new Error(lastError ?? `Compression failed: ${fallbackReason}`);
+        }
     }
     const lastPreset = history.length ? history[history.length - 1].preset : undefined;
     return {
@@ -156,5 +179,55 @@ function isGifSignature(bytes) {
     }
     const signature = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]);
     return signature === 'GIF87a' || signature === 'GIF89a';
+}
+async function fallbackCompressGif(file, limitBytes) {
+    const arrayBuffer = await file.arrayBuffer();
+    const parsed = parseGIF(new Uint8Array(arrayBuffer));
+    const frames = decompressFrames(parsed, true);
+    if (!frames.length) {
+        throw new Error('Fallback compression failed: no frames parsed.');
+    }
+    const { width, height } = frames[0].dims;
+    let targetWidth = width;
+    let targetHeight = height;
+    let lastBlob = await encodeGifFrames(frames, targetWidth, targetHeight);
+    while (lastBlob.size > limitBytes && Math.max(targetWidth, targetHeight) > FALLBACK_MIN_DIMENSION) {
+        targetWidth = Math.max(Math.floor(targetWidth * FALLBACK_SHRINK_STEP), FALLBACK_MIN_DIMENSION);
+        targetHeight = Math.max(Math.floor(targetHeight * FALLBACK_SHRINK_STEP), FALLBACK_MIN_DIMENSION);
+        lastBlob = await encodeGifFrames(frames, targetWidth, targetHeight);
+    }
+    return new File([lastBlob], file.name, { type: 'image/gif', lastModified: Date.now() });
+}
+async function encodeGifFrames(frames, width, height) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        throw new Error('Fallback compression failed: cannot obtain 2d context.');
+    }
+    const encoder = new GIFEncoder(width, height, 'neuquant', true);
+    encoder.setRepeat(0);
+    encoder.setQuality(30);
+    for (const frame of frames) {
+        drawFrameToContext(ctx, frame, width, height);
+        encoder.setDelay((frame.delay ?? 10) * 10); // delay is in hundredths; encoder expects ms
+        encoder.addFrame(ctx);
+    }
+    const buffer = encoder.out.getData();
+    return new Blob([buffer], { type: 'image/gif' });
+}
+function drawFrameToContext(ctx, frame, width, height) {
+    const imageData = new ImageData(new Uint8ClampedArray(frame.patch), frame.dims.width, frame.dims.height);
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = frame.dims.width;
+    tempCanvas.height = frame.dims.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) {
+        throw new Error('Fallback compression failed: cannot obtain temp 2d context.');
+    }
+    tempCtx.putImageData(imageData, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(tempCanvas, 0, 0, width, height);
 }
 const GIFSICLE_COMMON_FLAGS = ['-O3', '--no-warnings', '--no-interlace'];
