@@ -7,7 +7,7 @@ import { sanitizeDisplayName, sanitizeMessage, validateInput } from '../lib/sani
 import type { Streamer } from '../types';
 import type { AxiosError } from 'axios';
 
-const MAX_GIF_SIZE_BYTES = 2 * 1024 * 1024;
+const MAX_GIF_SIZE_BYTES = 4 * 1024 * 1024;
 const MAX_COMPRESSIBLE_BYTES = 8 * 1024 * 1024;
 
 const formatBytes = (bytes: number) => {
@@ -58,9 +58,9 @@ const SubmissionPage = () => {
       return;
     }
 
-    // Compress immediately on selection if above the 2MB upload limit.
+    // Compress immediately on selection if above the 4MB upload limit.
     if (selectedFile.size > MAX_GIF_SIZE_BYTES) {
-      console.info('[submission] File exceeds 2MB, attempting local compression on selection', {
+      console.info('[submission] File exceeds 4MB, attempting local compression on selection', {
         originalSize: selectedFile.size,
       });
       setStatus('compressing');
@@ -124,7 +124,7 @@ const SubmissionPage = () => {
     setError(null);
     if (file.size > MAX_GIF_SIZE_BYTES) {
       setStatus('error');
-      setError('GIFs must be 2MB or smaller. Please trim frames or reduce dimensions.');
+      setError('GIFs must be 4MB or smaller. Please trim frames or reduce dimensions.');
       return;
     }
 
@@ -203,7 +203,6 @@ const SubmissionPage = () => {
         <div>
           <p className="text-sm uppercase text-violet font-semibold tracking-wide">Submitting to</p>
           <h1 className="text-3xl font-bold">{data.displayName}</h1>
-          <p className="text-sm text-coolGray">Share your best transparent GIFs. Approved stickers stay up for 12h.</p>
         </div>
         {status === 'success' && <p className="rounded-btn bg-emerald/20 border border-emerald/40 p-2 text-white">Thanks! Your GIF is pending approval.</p>}
         {status === 'error' && error && <p className="rounded-btn bg-coral/20 border border-coral/40 p-2 text-white">{error}</p>}
@@ -260,7 +259,7 @@ const SubmissionPage = () => {
               required
             />
             <span className="text-xs text-dimGray">
-              Animated GIFs up to 2MB. We will try to compress files up to 8MB before upload.
+              Animated GIFs up to 4MB. We will try to compress files up to 8MB before upload.
             </span>
             {compressionNotice && <span className="mt-1 block text-xs text-emerald/80">{compressionNotice}</span>}
           </label>
