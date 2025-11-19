@@ -16,9 +16,11 @@ export async function compressGifToLimit(file, limitBytes) {
     const plan = buildCompressionPlan(metadata);
     const history = [];
     let attempts = 0;
+    let lastError;
     for (const preset of plan) {
         attempts += 1;
-        let outputFile;
+        let outputFile = null;
+        let attemptError = null;
         try {
             const [output] = await gifsicle.run({
                 input: [{ file: workingFile, name: GIFSICLE_INPUT_NAME }],
@@ -35,7 +37,12 @@ export async function compressGifToLimit(file, limitBytes) {
         }
         catch (error) {
             const reason = error instanceof Error ? error.message : String(error);
-            throw new Error(`[gifCompression] Failed during "${preset.description}": ${reason}`);
+            attemptError = `[gifCompression] Failed during "${preset.description}": ${reason}`;
+        }
+        if (!outputFile || attemptError) {
+            lastError = attemptError ?? 'Unknown gifsicle failure';
+            history.push({ preset, error: lastError });
+            continue;
         }
         workingFile = outputFile;
         history.push({ preset, bytes: workingFile.size });
@@ -51,6 +58,9 @@ export async function compressGifToLimit(file, limitBytes) {
                 lastPresetDescription: preset.description,
             };
         }
+    }
+    if (!history.length || history.every((entry) => entry.error)) {
+        throw new Error(lastError ?? 'Compression failed: no successful preset produced an output.');
     }
     const lastPreset = history.length ? history[history.length - 1].preset : undefined;
     return {
