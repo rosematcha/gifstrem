@@ -34,20 +34,55 @@ const SubmissionPage = () => {
         },
         enabled: Boolean(slug),
     });
-    const handleFileChange = (event) => {
+    const handleFileChange = async (event) => {
         const selectedFile = event.target.files?.[0] ?? null;
-        setFile(selectedFile);
         setCompressionNotice(null);
+        setError(null);
+        setStatus('idle');
         if (!selectedFile) {
+            setFile(null);
             return;
         }
         if (selectedFile.size > MAX_COMPRESSIBLE_BYTES) {
             setStatus('error');
             setError('GIFs must be 8MB or smaller before upload.');
+            setFile(null);
             return;
         }
-        setError(null);
+        // Compress immediately on selection if above the 2MB upload limit.
+        if (selectedFile.size > MAX_GIF_SIZE_BYTES) {
+            console.info('[submission] File exceeds 2MB, attempting local compression on selection', {
+                originalSize: selectedFile.size,
+            });
+            setStatus('compressing');
+            try {
+                const compression = await compressGifToLimit(selectedFile, MAX_GIF_SIZE_BYTES);
+                const compressedFile = compression.file;
+                setFile(compressedFile);
+                const strategySuffix = compression.lastPresetDescription ? ` using ${compression.lastPresetDescription}` : '';
+                setCompressionNotice(`Compressed from ${formatBytes(compression.beforeBytes)} to ${formatBytes(compression.afterBytes)}${strategySuffix}`);
+                if (compressedFile.size > MAX_GIF_SIZE_BYTES) {
+                    const lastStrategy = compression.lastPresetDescription
+                        ? ` (last attempt: ${compression.lastPresetDescription})`
+                        : '';
+                    setStatus('error');
+                    setError(`We tried ${compression.attempts} compression strategies${lastStrategy}, but the GIF is still ${formatBytes(compressedFile.size)}. Please trim frames or reduce dimensions.`);
+                    return;
+                }
+                setStatus('idle');
+            }
+            catch (compressionError) {
+                console.error('[submission] Compression failed on selection', compressionError);
+                setStatus('error');
+                setFile(null);
+                setError('We could not compress this GIF locally. Please export a smaller file.');
+            }
+            return;
+        }
+        // Small enough, keep as-is.
+        setFile(selectedFile);
         setStatus('idle');
+        setCompressionNotice(null);
     };
     const handleSubmit = async (event) => {
         event.preventDefault();
@@ -67,39 +102,12 @@ const SubmissionPage = () => {
             return;
         }
         setError(null);
-        let fileToUpload = file;
         if (file.size > MAX_GIF_SIZE_BYTES) {
-            console.info('[submission] File exceeds 2MB, attempting local compression', {
-                originalSize: file.size,
-            });
-            setStatus('compressing');
-            try {
-                const compression = await compressGifToLimit(file, MAX_GIF_SIZE_BYTES);
-                fileToUpload = compression.file;
-                setFile(fileToUpload);
-                const strategySuffix = compression.lastPresetDescription
-                    ? ` using ${compression.lastPresetDescription}`
-                    : '';
-                setCompressionNotice(`Compressed from ${formatBytes(compression.beforeBytes)} to ${formatBytes(compression.afterBytes)}${strategySuffix}`);
-                if (fileToUpload.size > MAX_GIF_SIZE_BYTES) {
-                    setStatus('error');
-                    const lastStrategy = compression.lastPresetDescription
-                        ? ` (last attempt: ${compression.lastPresetDescription})`
-                        : '';
-                    setError(`We tried ${compression.attempts} compression strategies${lastStrategy}, but the GIF is still ${formatBytes(fileToUpload.size)}. Please trim frames or reduce dimensions.`);
-                    return;
-                }
-            }
-            catch (compressionError) {
-                console.error('[submission] Compression failed', compressionError);
-                setStatus('error');
-                setError('We could not compress this GIF locally. Please export a smaller file.');
-                return;
-            }
+            setStatus('error');
+            setError('GIFs must be 2MB or smaller. Please trim frames or reduce dimensions.');
+            return;
         }
-        else {
-            setCompressionNotice(null);
-        }
+        const fileToUpload = file;
         setStatus('submitting');
         const formData = new FormData();
         console.debug('[submission] creating form data container');
