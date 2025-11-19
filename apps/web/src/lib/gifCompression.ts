@@ -104,7 +104,9 @@ export async function compressGifToLimit(file: File, limitBytes: number): Promis
     }
   }
 
-  if (!history.length || history.every((entry) => entry.error)) {
+  const shouldFallback = workingFile.size > limitBytes || !history.length || history.every((entry) => entry.error);
+
+  if (shouldFallback) {
     // Attempt a canvas-based fallback if gifsicle cannot produce output in this environment.
     try {
       const fallback = await fallbackCompressGif(workingFile, limitBytes);
