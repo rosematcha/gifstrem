@@ -85,7 +85,18 @@ export async function compressGifToLimit(file, limitBytes) {
         }
         catch (fallbackError) {
             const fallbackReason = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-            throw new Error(lastError ?? `Compression failed: ${fallbackReason}`);
+            console.warn('[gifCompression] Fallback encoder failed', fallbackError);
+            const lastPreset = history.length ? history[history.length - 1].preset : undefined;
+            return {
+                file: workingFile,
+                beforeBytes,
+                afterBytes: workingFile.size,
+                attempts: attempts + 1,
+                exhaustedPresets: true,
+                history,
+                metadata,
+                lastPresetDescription: lastPreset?.description ?? 'fallback failed',
+            };
         }
     }
     const lastPreset = history.length ? history[history.length - 1].preset : undefined;

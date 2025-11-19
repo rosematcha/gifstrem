@@ -8,18 +8,21 @@ export default defineConfig({
       stream: 'stream-browserify',
       events: 'events',
       buffer: 'buffer',
+      process: 'process/browser',
     },
   },
   optimizeDeps: {
-    include: ['gif-encoder-2', 'stream-browserify', 'events', 'buffer'],
+    include: ['gif-encoder-2', 'stream-browserify', 'events', 'buffer', 'process/browser'],
     esbuildOptions: {
       define: {
         global: 'globalThis',
+        'process.env.NODE_DEBUG': 'false',
       },
     },
   },
   define: {
     global: 'globalThis',
+    'process.env.NODE_DEBUG': 'false',
   },
   server: {
     port: 4173,
