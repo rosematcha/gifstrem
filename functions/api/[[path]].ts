@@ -17,6 +17,8 @@ type AppVariables = {
   user?: UserRow;
 };
 
+const MAX_SUBMISSIONS_PER_STREAMER = 64;
+
 const app = new Hono<{ Bindings: AppBindings; Variables: AppVariables }>();
 
 app.use('*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type'] }));
@@ -188,6 +190,9 @@ app.post('/api/submissions/public', async (c) => {
       fileSize: file.size,
       expiresInHours: 12,
     });
+
+    await enforceSubmissionCap(c.env, repos, streamer.id);
+
     return c.json({ submission: serializeSubmission(submission) }, 201);
   } catch (error) {
     console.error('[submission] Unexpected failure while uploading', error);
@@ -410,6 +415,19 @@ async function removeExpiredForStreamer(env: AppBindings, repos: Repositories, s
     console.warn('Failed to delete expired R2 files', error);
   }
   await repos.submissions.deleteMany(expired.map((submission) => submission.id));
+}
+
+async function enforceSubmissionCap(env: AppBindings, repos: Repositories, streamerId: string) {
+  const excess = await repos.submissions.oldestBeyondLimit(streamerId, MAX_SUBMISSIONS_PER_STREAMER);
+  if (excess.length === 0) {
+    return;
+  }
+  try {
+    await deleteGifFromR2(env, excess.map((submission) => submission.file_key));
+  } catch (error) {
+    console.warn('Failed to delete R2 files while enforcing submission cap', error);
+  }
+  await repos.submissions.deleteMany(excess.map((submission) => submission.id));
 }
 
 export const onRequest: PagesFunction<AppBindings> = (context) => {

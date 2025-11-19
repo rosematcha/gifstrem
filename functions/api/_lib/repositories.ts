@@ -24,6 +24,8 @@ export type UpdateSubmissionLayoutInput = {
   layout: Record<string, unknown>;
 };
 
+const SUBMISSION_LIMIT = 64;
+
 const INITIAL_SETTINGS = JSON.stringify({
   safeZones: {},
   animation: { type: 'pop', durationMs: 600 },
@@ -96,6 +98,12 @@ export function createRepositories(env: GifstremBindings) {
       },
     },
     submissions: {
+      async countForStreamer(streamerId: string): Promise<number> {
+        const record = await env.DB.prepare('SELECT COUNT(*) as total FROM submissions WHERE streamer_id = ?')
+          .bind(streamerId)
+          .first<{ total: number }>();
+        return Number(record?.total ?? 0);
+      },
       async create(input: CreateSubmissionInput): Promise<SubmissionRow> {
         const now = new Date();
         const expires = new Date(now.getTime() + input.expiresInHours * 60 * 60 * 1000).toISOString();
@@ -125,6 +133,19 @@ export function createRepositories(env: GifstremBindings) {
           throw new Error('Failed to save submission');
         }
         return record;
+      },
+      async oldestBeyondLimit(streamerId: string, limit: number = SUBMISSION_LIMIT): Promise<SubmissionRow[]> {
+        const total = await this.countForStreamer(streamerId);
+        const overage = total - limit;
+        if (overage <= 0) {
+          return [];
+        }
+        const { results } = await env.DB.prepare(
+          'SELECT * FROM submissions WHERE streamer_id = ? ORDER BY created_at ASC LIMIT ?',
+        )
+          .bind(streamerId, overage)
+          .all<SubmissionRow>();
+        return (results ?? []) as SubmissionRow[];
       },
       async listByStatus(streamerId: string, status: 'pending' | 'approved' | 'denied'): Promise<SubmissionRow[]> {
         const { results } = await env.DB.prepare(

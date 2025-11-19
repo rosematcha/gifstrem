@@ -23,7 +23,10 @@ export async function compressGifToLimit(file, limitBytes) {
             const [output] = await gifsicle.run({
                 input: [{ file: workingFile, name: GIFSICLE_INPUT_NAME }],
                 command: buildCommand(preset),
-                isStrict: true,
+                // Strict mode treats any stderr line as a hard failure; some gifsicle
+                // builds emit benign noise in the browser environment. We validate the
+                // output ourselves below instead.
+                isStrict: false,
             });
             if (!output) {
                 throw new Error('Compression failed: no output produced.');
@@ -66,7 +69,7 @@ async function renameOutput(output, targetName) {
     return new File([buffer], targetName, { type: 'image/gif', lastModified: Date.now() });
 }
 function buildCommand(preset) {
-    const command = ['-O3'];
+    const command = [...GIFSICLE_COMMON_FLAGS];
     if (typeof preset.lossy === 'number' && preset.lossy > 0) {
         command.push(`--lossy=${preset.lossy}`);
     }
@@ -142,3 +145,4 @@ function isGifSignature(bytes) {
     const signature = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]);
     return signature === 'GIF87a' || signature === 'GIF89a';
 }
+const GIFSICLE_COMMON_FLAGS = ['-O3', '--no-warnings'];
