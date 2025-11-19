@@ -14,11 +14,14 @@
     "pages:dev": "npm run build -w @gifstrem/web && wrangler pages dev apps/web/dist"
   },
   "dependencies": {
+    "buffer": "^6.0.3",
+    "events": "^3.3.0",
     "gif-encoder-2": "^1.0.4",
     "gifuct-js": "^2.1.2",
     "hono": "4.5.5",
     "jose": "5.2.1",
     "scrypt-js": "3.0.1",
+    "stream-browserify": "^3.0.0",
     "zod": "3.23.8"
   },
   "optionalDependencies": {
