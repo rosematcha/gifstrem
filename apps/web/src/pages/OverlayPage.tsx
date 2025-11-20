@@ -175,7 +175,7 @@ const OverlayPage = () => {
       };
     });
 
-    const layered = [...items].sort((a, b) => a.size - b.size);
+    const layered = [...items].sort((a, b) => b.size - a.size);
     layered.forEach((item, idx) => {
       item.zIndex = 200 + idx;
     });
@@ -767,8 +767,8 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-const MAX_OVERLAP_RATIO = 0.005;
-const SPREAD_PADDING = 14;
+const MAX_OVERLAP_RATIO = 0.0025;
+const SPREAD_PADDING = 18;
 
 function resolveOverlaps(
   rect: { x: number; y: number; size: number },
@@ -875,7 +875,10 @@ function overlapScore(
   padding = SPREAD_PADDING,
 ) {
   if (existing.length === 0) return 0;
-  return Math.max(...existing.map((placed) => overlapRatio(candidate, placed, padding)));
+  const ratios = existing.map((placed) => overlapRatio(candidate, placed, padding));
+  const maxRatio = Math.max(...ratios);
+  const avgRatio = ratios.reduce((sum, r) => sum + r, 0) / ratios.length;
+  return Math.max(maxRatio, avgRatio * 1.1);
 }
 
 function findLowOverlapPlacement(
