@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { scaleSafeZones } from '../lib/safeZones';
 import type { ResolutionSafeZone, SafeZone, Streamer, Submission } from '../types';
 
 const RESOLUTION_SPECS = {
@@ -91,9 +92,10 @@ const OverlayPage = () => {
           ? [legacyZone]
           : undefined;
     if (safeZoneSetting && normalizedZones) {
+      const scaledZones = scaleSafeZones(normalizedZones, safeZoneSetting.size ?? canvasSize, canvasSize);
       return {
-        zones: normalizedZones.slice(),
-        size: safeZoneSetting.size ?? canvasSize,
+        zones: scaledZones,
+        size: canvasSize,
         enabled: safeZoneSetting.enabled ?? true,
       };
     }
@@ -103,6 +105,7 @@ const OverlayPage = () => {
   const effectiveSafeZones = safeZoneEnabled ? safeZoneConfig.zones : [];
   const showSafeZone =
     safeZoneEnabled && (query.data?.streamer.settings?.showSafeZoneOverlay ?? false);
+  const rotationEnabled = query.data?.streamer.settings?.rotationEnabled ?? true;
 
   const layout = useMemo(() => {
     if (!query.data) return [];
@@ -153,7 +156,8 @@ const OverlayPage = () => {
       const rotationSignSeed = randomFromHash(`${seedKey}-rotation-sign`, 0, 1) >= 0.5 ? 1 : -1;
       const rotationMagnitude = randomFromHash(`${seedKey}-rotation-mag`, 3, 13);
       const flattenChance = randomFromHash(`${seedKey}-rotation-flat`, 0, 1);
-      const rotation = flattenChance > 0.9 ? 0 : rotationSignSeed * rotationMagnitude;
+      const rotation =
+        rotationEnabled && flattenChance <= 0.9 ? rotationSignSeed * rotationMagnitude : 0;
       return {
         id: submission.id,
         submission,
@@ -171,7 +175,7 @@ const OverlayPage = () => {
     });
 
     return items;
-  }, [canvasSize, query.data, safeZoneEnabled, safeZoneConfig.zones]);
+  }, [canvasSize, query.data, rotationEnabled, safeZoneEnabled, safeZoneConfig.zones]);
 
   if (!token) {
     return <div className="p-8 text-center text-red-400">Missing overlay token.</div>;
@@ -693,6 +697,8 @@ function selectPocket(
   const canvasCenterY = canvas.height / 2;
   const directionAngles = [Math.PI, -Math.PI / 2, 0, Math.PI / 2]; // left, top, right, bottom
   const desiredAngle = directionAngles[index % directionAngles.length];
+  const minUsage = pockets.reduce((min, pocket) => Math.min(min, pocket.usage), pockets[0].usage);
+  const maxUsage = pockets.reduce((max, pocket) => Math.max(max, pocket.usage), pockets[0].usage);
 
   const scored = pockets
     .map((pocket) => {
@@ -717,13 +723,14 @@ function selectPocket(
         clamp(1 - nearestEdge / Math.max(1, Math.min(canvas.width, canvas.height) * 0.5), 0, 1) * 0.55;
       const noise = randomFromHash(`${seed}-${pocket.name}-jitter`, -40, 40);
       const densityFactor = 1 - sampleDensity(density, pocket.rect);
-      const score =
+      const usageRatio = maxUsage === 0 ? 0 : pocket.usage / maxUsage;
+      const spreadBias = clamp(1.2 - usageRatio * 0.8, 0.55, 1.2); // push toward less-used pockets
+      const diversityBoost = pocket.usage === minUsage ? 1.08 : 1; // slight bump for the emptiest pocket
+      const positiveScore =
         freeArea * pocket.priority * densityFactor * 0.45 +
         freeArea * 0.15 +
-        freeArea * (directionalBias * 0.7 + edgeBias * 0.6) -
-        usagePenalty -
-        saturationPenalty * 80 +
-        noise;
+        freeArea * (directionalBias * 0.7 + edgeBias * 0.6);
+      const score = positiveScore * spreadBias * diversityBoost - usagePenalty - saturationPenalty * 80 + noise;
       return { pocket, score };
     })
     .sort((a, b) => b.score - a.score);

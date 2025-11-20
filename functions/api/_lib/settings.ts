@@ -2,6 +2,7 @@ import type { ResolutionSafeZone, SafeZone, SettingsShape } from './types';
 
 const DEFAULT_ANIMATION = { type: 'pop', durationMs: 600 } as const;
 const DEFAULT_SIZE = { width: 1920, height: 1080 } as const;
+const DEFAULT_ROTATION_ENABLED = true;
 
 export function ensureSettings(payload: string | null | undefined): SettingsShape {
   let parsed: unknown;
@@ -35,6 +36,7 @@ export function ensureSettings(payload: string | null | undefined): SettingsShap
         ? ((parsed as Record<string, unknown>).showSafeZoneOverlay as boolean)
         : undefined
       : undefined;
+  const rotationEnabled = normalizeRotationEnabled(parsed);
   const preferredResolution = normalizePreferredResolution(parsed);
   const customResolution = normalizeCustomResolution(parsed);
 
@@ -42,6 +44,7 @@ export function ensureSettings(payload: string | null | undefined): SettingsShap
     safeZones,
     animation,
     showSafeZoneOverlay,
+    rotationEnabled,
     preferredResolution,
     customResolution,
   };
@@ -142,6 +145,16 @@ function normalizeAnimation(payload: unknown) {
     }
   }
   return { ...DEFAULT_ANIMATION };
+}
+
+function normalizeRotationEnabled(payload: unknown) {
+  if (payload && typeof payload === 'object' && 'rotationEnabled' in payload) {
+    const value = (payload as Record<string, unknown>).rotationEnabled;
+    if (typeof value === 'boolean') {
+      return value;
+    }
+  }
+  return DEFAULT_ROTATION_ENABLED;
 }
 
 function normalizePreferredResolution(payload: unknown) {

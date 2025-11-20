@@ -302,6 +302,19 @@ app.put('/api/settings/show-safe-zone', requireAuth, async (c) => {
   return c.json({ user: serializeUser(updated!) });
 });
 
+app.put('/api/settings/rotation', requireAuth, async (c) => {
+  const result = z.object({ enabled: z.boolean() }).safeParse(await c.req.json());
+  if (!result.success) {
+    return c.json({ error: 'Invalid payload' }, 400);
+  }
+  const user = c.get('user')!;
+  const settings = ensureSettings(user.settings);
+  settings.rotationEnabled = result.data.enabled;
+  await c.get('repos').users.updateSettings(user.id, settings);
+  const updated = await c.get('repos').users.findById(user.id);
+  return c.json({ user: serializeUser(updated!) });
+});
+
 app.put('/api/settings/resolution', requireAuth, async (c) => {
   const result = z
     .object({

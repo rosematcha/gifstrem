@@ -15,6 +15,7 @@ export type StreamerSettings = {
   safeZones: Record<string, ResolutionSafeZone>;
   animation: { type: string; durationMs: number };
   showSafeZoneOverlay?: boolean;
+  rotationEnabled?: boolean;
   preferredResolution?: '720p' | '1080p' | '2160p' | 'custom';
   customResolution?: { width: number; height: number };
 };
