@@ -154,7 +154,7 @@ const OverlayPage = () => {
       pocket.usedArea += rect.size * rect.size;
       applyDensity(densityMap, rect);
       const rotationSignSeed = randomFromHash(`${seedKey}-rotation-sign`, 0, 1) >= 0.5 ? 1 : -1;
-      const rotationMagnitude = randomFromHash(`${seedKey}-rotation-mag`, 3, 13);
+      const rotationMagnitude = randomFromHash(`${seedKey}-rotation-mag`, 2, 9);
       const flattenChance = randomFromHash(`${seedKey}-rotation-flat`, 0, 1);
       const rotation =
         rotationEnabled && flattenChance <= 0.9 ? rotationSignSeed * rotationMagnitude : 0;
@@ -761,7 +761,7 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-const MAX_OVERLAP_RATIO = 0.05;
+const MAX_OVERLAP_RATIO = 0.01;
 
 function resolveOverlaps(
   rect: { x: number; y: number; size: number },
@@ -778,10 +778,10 @@ function resolveOverlaps(
   let size = rect.size;
   let bestCandidate = rect;
   let bestScore = Number.POSITIVE_INFINITY;
-  for (let shrink = 0; shrink < 4; shrink += 1) {
+  for (let shrink = 0; shrink < 6; shrink += 1) {
     const shift = size * (0.58 - shrink * 0.05);
     const offsets = [{ dx: 0, dy: 0 }, { dx: shift, dy: 0 }, { dx: -shift, dy: 0 }, { dx: 0, dy: shift }, { dx: 0, dy: -shift }];
-    const steps = 14;
+    const steps = 20;
     for (let i = 0; i < steps; i += 1) {
       const angle =
         (i / steps) * Math.PI * 2 + randomFromHash(`${seed}-overlap-${rect.x}-${rect.y}-${shrink}-${i}`, 0, Math.PI / 6);
@@ -875,14 +875,38 @@ function findLowOverlapPlacement(
 ) {
   let best = seedCandidate;
   let bestScore = overlapScore(seedCandidate, existing);
-  const attempts = 42;
   if (bestScore <= MAX_OVERLAP_RATIO) {
     return seedCandidate;
   }
 
   const widthLimit = canvas.width - seedCandidate.size;
   const heightLimit = canvas.height - seedCandidate.size;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+  const gridCols = 6;
+  const gridRows = 4;
+  const gridSpacingX = widthLimit / Math.max(1, gridCols - 1);
+  const gridSpacingY = heightLimit / Math.max(1, gridRows - 1);
+  const gridSamples: { x: number; y: number }[] = [];
+  for (let gx = 0; gx < gridCols; gx += 1) {
+    for (let gy = 0; gy < gridRows; gy += 1) {
+      gridSamples.push({ x: gx * gridSpacingX, y: gy * gridSpacingY });
+    }
+  }
+  for (const sample of gridSamples) {
+    let candidate = clampRect({ x: sample.x, y: sample.y, size: seedCandidate.size }, canvas);
+    if (respectSafeZone) {
+      candidate = keepOutsideSafeZones(candidate, safeZones, canvas);
+    }
+    const score = overlapScore(candidate, existing);
+    if (score < bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+    if (score <= MAX_OVERLAP_RATIO) {
+      return candidate;
+    }
+  }
+
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     const offsetSeed = `${seed}-fallback-${attempt}`;
     const randomColumn = randomFromHash(`${offsetSeed}-x`, 0, widthLimit);
     const randomRow = randomFromHash(`${offsetSeed}-y`, 0, heightLimit);
