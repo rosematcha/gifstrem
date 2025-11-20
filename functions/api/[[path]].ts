@@ -7,7 +7,7 @@ import { createRepositories, Repositories } from './_lib/repositories';
 import { serializeSubmission, serializeUser } from './_lib/serializers';
 import { createOverlayToken, generateAccessToken, hashPassword, verifyAccessToken, verifyPassword } from './_lib/security';
 import type { GifstremBindings, UserRow } from './_lib/types';
-import { saveGifToR2, deleteGifFromR2 } from './_lib/storage';
+import { saveSubmissionFileToR2, deleteSubmissionFileFromR2 } from './_lib/storage';
 import { sanitizeDisplayName, sanitizeSlug, sanitizeMessage, sanitizeText, validateNoSqlInjection } from './_lib/sanitize';
 import { ensureSettings } from './_lib/settings';
 
@@ -139,6 +139,9 @@ app.get('/api/overlay/feed', async (c) => {
   return c.json({ streamer: serializeUser(streamer), submissions });
 });
 
+const SUPPORTED_FILE_TYPES = new Set(['image/gif', 'image/png', 'image/jpeg', 'image/jpg']);
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+
 app.post('/api/submissions/public', async (c) => {
   const form = await c.req.formData();
   const payload = submissionSchema.safeParse({
@@ -151,13 +154,13 @@ app.post('/api/submissions/public', async (c) => {
   }
   const file = form.get('file');
   if (!(file instanceof File)) {
-    return c.json({ error: 'GIF file is required.' }, 400);
+    return c.json({ error: 'Media file is required.' }, 400);
   }
-  if (file.type !== 'image/gif') {
-    return c.json({ error: 'Only GIF uploads are supported right now.' }, 400);
+  if (!SUPPORTED_FILE_TYPES.has(file.type)) {
+    return c.json({ error: 'Only GIF, PNG, or JPEG uploads are supported right now.' }, 400);
   }
-  if (file.size > 4 * 1024 * 1024) {
-    return c.json({ error: 'GIF file exceeds the 4MB limit.' }, 400);
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return c.json({ error: 'File exceeds the 4MB limit.' }, 400);
   }
   const repos = c.get('repos');
   const streamer = await repos.users.findBySlug(payload.data.slug);
@@ -170,13 +173,13 @@ app.post('/api/submissions/public', async (c) => {
       slug: streamer.slug,
       file: { name: file.name, size: file.size, type: file.type },
     });
-    const stored = await saveGifToR2(c.env, file, streamer.slug);
-    
+    const stored = await saveSubmissionFileToR2(c.env, file, streamer.slug);
+
     if (stored.sanitizationWarnings && stored.sanitizationWarnings.length > 0) {
-      console.info('[submission] GIF sanitization warnings', {
+      console.info('[submission] Sanitization warnings', {
         slug: streamer.slug,
         fileName: file.name,
-        warnings: stored.sanitizationWarnings
+        warnings: stored.sanitizationWarnings,
       });
     }
     
@@ -214,6 +217,14 @@ app.get('/api/submissions/approved', requireAuth, async (c) => {
   return c.json({ submissions });
 });
 
+const deleteSubmissionFiles = async (env: AppBindings, keys: string | string[]) => {
+  try {
+    await deleteSubmissionFileFromR2(env, keys);
+  } catch (error) {
+    console.warn('Failed to delete R2 file', error);
+  }
+};
+
 app.post('/api/submissions/:id/review', requireAuth, async (c) => {
   const payload = z.object({ action: z.enum(['approve', 'deny']) }).safeParse(await c.req.json());
   if (!payload.success) {
@@ -227,11 +238,7 @@ app.post('/api/submissions/:id/review', requireAuth, async (c) => {
   }
   await repos.submissions.updateStatus(submission.id, payload.data.action === 'approve' ? 'approved' : 'denied');
   if (payload.data.action === 'deny') {
-    try {
-      await deleteGifFromR2(c.env, submission.file_key);
-    } catch (error) {
-      console.warn('Failed to delete R2 file', error);
-    }
+    await deleteSubmissionFiles(c.env, submission.file_key);
   }
   const updated = await repos.submissions.findById(submission.id);
   return c.json({ submission: serializeSubmission(updated!) });
@@ -245,7 +252,7 @@ app.delete('/api/submissions/:id', requireAuth, async (c) => {
     return c.json({ error: 'Submission not found' }, 404);
   }
   try {
-    await deleteGifFromR2(c.env, submission.file_key);
+    await deleteSubmissionFileFromR2(c.env, submission.file_key);
   } catch (error) {
     // ignore best-effort cleanup
   }
@@ -410,7 +417,7 @@ async function removeExpiredForStreamer(env: AppBindings, repos: Repositories, s
     return;
   }
   try {
-    await deleteGifFromR2(env, expired.map((submission) => submission.file_key));
+    await deleteSubmissionFileFromR2(env, expired.map((submission) => submission.file_key));
   } catch (error) {
     console.warn('Failed to delete expired R2 files', error);
   }
@@ -423,7 +430,7 @@ async function enforceSubmissionCap(env: AppBindings, repos: Repositories, strea
     return;
   }
   try {
-    await deleteGifFromR2(env, excess.map((submission) => submission.file_key));
+    await deleteSubmissionFileFromR2(env, excess.map((submission) => submission.file_key));
   } catch (error) {
     console.warn('Failed to delete R2 files while enforcing submission cap', error);
   }

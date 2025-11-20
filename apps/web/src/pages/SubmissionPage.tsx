@@ -7,8 +7,9 @@ import { sanitizeDisplayName, sanitizeMessage, validateInput } from '../lib/sani
 import type { Streamer } from '../types';
 import type { AxiosError } from 'axios';
 
-const MAX_GIF_SIZE_BYTES = 4 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 const MAX_COMPRESSIBLE_BYTES = 8 * 1024 * 1024;
+const SUPPORTED_FILE_TYPES = new Set(['image/gif', 'image/png', 'image/jpeg', 'image/jpg']);
 
 const formatBytes = (bytes: number) => {
   const units = ['bytes', 'KB', 'MB'];
@@ -51,55 +52,73 @@ const SubmissionPage = () => {
       return;
     }
 
-    if (selectedFile.size > MAX_COMPRESSIBLE_BYTES) {
+    if (!SUPPORTED_FILE_TYPES.has(selectedFile.type)) {
       setStatus('error');
-      setError('GIFs must be 8MB or smaller before upload.');
+      setError('Only GIF, PNG, or JPEG uploads are supported.');
       setFile(null);
       return;
     }
 
-    // Compress immediately on selection if above the 4MB upload limit.
-    if (selectedFile.size > MAX_GIF_SIZE_BYTES) {
-      console.info('[submission] File exceeds 4MB, attempting local compression on selection', {
-        originalSize: selectedFile.size,
-      });
-      setStatus('compressing');
-      try {
-        const compression = await compressGifToLimit(selectedFile, MAX_GIF_SIZE_BYTES);
-        const compressedFile = compression.file;
-        setFile(compressedFile);
-        const strategySuffix = compression.lastPresetDescription ? ` using ${compression.lastPresetDescription}` : '';
-        setCompressionNotice(
-          `Compressed from ${formatBytes(compression.beforeBytes)} to ${formatBytes(compression.afterBytes)}${strategySuffix}`,
-        );
-
-        if (compressedFile.size > MAX_GIF_SIZE_BYTES) {
-          const lastStrategy = compression.lastPresetDescription
-            ? ` (last attempt: ${compression.lastPresetDescription})`
-            : '';
-          setStatus('error');
-          setError(
-            `We tried ${compression.attempts} compression strategies${lastStrategy}, but the GIF is still ${formatBytes(
-              compressedFile.size,
-            )}. Please trim frames or reduce dimensions.`,
-          );
-          return;
-        }
-
-        setStatus('idle');
-      } catch (compressionError) {
-        console.error('[submission] Compression failed on selection', compressionError);
+    const isGif = selectedFile.type === 'image/gif';
+    if (isGif) {
+      if (selectedFile.size > MAX_COMPRESSIBLE_BYTES) {
         setStatus('error');
+        setError('GIFs must be 8MB or smaller before upload.');
         setFile(null);
-        setError('We could not compress this GIF locally. Please export a smaller file.');
+        return;
       }
+
+      if (selectedFile.size > MAX_UPLOAD_BYTES) {
+        console.info('[submission] File exceeds 4MB, attempting local compression on selection', {
+          originalSize: selectedFile.size,
+        });
+        setStatus('compressing');
+        try {
+          const compression = await compressGifToLimit(selectedFile, MAX_UPLOAD_BYTES);
+          const compressedFile = compression.file;
+          setFile(compressedFile);
+          const strategySuffix = compression.lastPresetDescription ? ` using ${compression.lastPresetDescription}` : '';
+          setCompressionNotice(
+            `Compressed from ${formatBytes(compression.beforeBytes)} to ${formatBytes(compression.afterBytes)}${strategySuffix}`,
+          );
+
+          if (compressedFile.size > MAX_UPLOAD_BYTES) {
+            const lastStrategy = compression.lastPresetDescription
+              ? ` (last attempt: ${compression.lastPresetDescription})`
+              : '';
+            setStatus('error');
+            setError(
+              `We tried ${compression.attempts} compression strategies${lastStrategy}, but the GIF is still ${formatBytes(
+                compressedFile.size,
+              )}. Please trim frames or reduce dimensions.`,
+            );
+            return;
+          }
+
+          setStatus('idle');
+        } catch (compressionError) {
+          console.error('[submission] Compression failed on selection', compressionError);
+          setStatus('error');
+          setFile(null);
+          setError('We could not compress this GIF locally. Please export a smaller file.');
+        }
+        return;
+      }
+
+      setFile(selectedFile);
+      setStatus('idle');
       return;
     }
 
-    // Small enough, keep as-is.
+    if (selectedFile.size > MAX_UPLOAD_BYTES) {
+      setStatus('error');
+      setError('Images must be 4MB or smaller. Please export a smaller file.');
+      setFile(null);
+      return;
+    }
+
     setFile(selectedFile);
     setStatus('idle');
-    setCompressionNotice(null);
   };
 
   const handleSubmit = async (event: FormEvent) => {
@@ -107,11 +126,11 @@ const SubmissionPage = () => {
     if (!file || !slug) {
       const message = `Missing fields: slug=${slug ?? 'undefined'}, file=${file ? 'present' : 'absent'}`;
       console.warn('[submission] Aborting submission before request', message);
-      setError('Please select a GIF first');
+      setError('Please select a GIF or image first.');
       return;
     }
 
-    if (file.size > MAX_COMPRESSIBLE_BYTES) {
+    if (file.type === 'image/gif' && file.size > MAX_COMPRESSIBLE_BYTES) {
       console.warn('[submission] File rejected before compression attempt', {
         size: file.size,
         maxCompressible: MAX_COMPRESSIBLE_BYTES,
@@ -121,10 +140,13 @@ const SubmissionPage = () => {
       return;
     }
 
-    setError(null);
-    if (file.size > MAX_GIF_SIZE_BYTES) {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      const message =
+        file.type === 'image/gif'
+          ? 'GIFs must be 4MB or smaller. Please trim frames or reduce dimensions.'
+          : 'Images must be 4MB or smaller. Please export a smaller file.';
       setStatus('error');
-      setError('GIFs must be 4MB or smaller. Please trim frames or reduce dimensions.');
+      setError(message);
       return;
     }
 
@@ -146,7 +168,7 @@ const SubmissionPage = () => {
       size: fileToUpload.size,
     });
     try {
-      console.info('[submission] Uploading GIF', {
+      console.info('[submission] Uploading submission', {
         slug,
         uploaderName,
         messageLength: message.length,
@@ -185,7 +207,7 @@ const SubmissionPage = () => {
         requestUrl: axiosError.config?.url,
       });
       setStatus('error');
-      setError(messageText ?? 'Unable to submit GIF right now.');
+      setError(messageText ?? 'Unable to submit media right now.');
     }
   };
 
@@ -204,7 +226,7 @@ const SubmissionPage = () => {
           <p className="text-sm uppercase text-violet font-semibold tracking-wide">Submitting to</p>
           <h1 className="text-3xl font-bold">{data.displayName}</h1>
         </div>
-        {status === 'success' && <p className="rounded-btn bg-emerald/20 border border-emerald/40 p-2 text-white">Thanks! Your GIF is pending approval.</p>}
+        {status === 'success' && <p className="rounded-btn bg-emerald/20 border border-emerald/40 p-2 text-white">Thanks! Your submission is pending approval.</p>}
         {status === 'error' && error && <p className="rounded-btn bg-coral/20 border border-coral/40 p-2 text-white">{error}</p>}
         <form className="space-y-m" onSubmit={handleSubmit}>
           <label className="block text-sm font-semibold text-coolGray">
@@ -250,16 +272,16 @@ const SubmissionPage = () => {
             />
           </label>
           <label className="block text-sm font-semibold text-coolGray">
-            GIF file
+            Upload file
             <input
               type="file"
-              accept="image/gif"
+              accept="image/gif,image/png,image/jpeg,image/jpg"
               className="mt-1 w-full rounded-btn border border-dashed border-slate bg-charcoal p-4 file:mr-4 file:rounded-btn file:border-0 file:bg-violet file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-softViolet"
               onChange={handleFileChange}
               required
             />
             <span className="text-xs text-dimGray">
-              Animated GIFs up to 4MB. We will try to compress files up to 8MB before upload.
+              Animated GIFs or PNG/JPEG stills up to 4MB. GIFs bigger than 4MB may be compressed locally down to the limit.
             </span>
             {compressionNotice && <span className="mt-1 block text-xs text-emerald/80">{compressionNotice}</span>}
           </label>
@@ -268,7 +290,7 @@ const SubmissionPage = () => {
             disabled={status === 'submitting' || status === 'compressing'}
             className="w-full rounded-btn bg-violet py-[10px] px-5 font-semibold text-white hover:bg-softViolet hover:-translate-y-[1px] active:bg-deepViolet active:translate-y-0 disabled:opacity-50"
           >
-            {status === 'compressing' ? 'Compressing GIF...' : status === 'submitting' ? 'Uploading...' : 'Submit GIF'}
+            {status === 'compressing' ? 'Compressing GIF...' : status === 'submitting' ? 'Uploading...' : 'Submit media'}
           </button>
         </form>
       </div>

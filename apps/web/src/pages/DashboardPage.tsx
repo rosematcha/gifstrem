@@ -295,7 +295,7 @@ const DashboardPage = () => {
                   </div>
                 ))}
                 {(pendingQuery.data ?? []).length === 0 && (
-                  <p className="text-sm text-dimGray">Queue is clear. Share your link to collect more GIFs.</p>
+                  <p className="text-sm text-dimGray">Queue is clear. Share your link to collect more submissions.</p>
                 )}
               </div>
             </div>
@@ -331,7 +331,7 @@ const DashboardPage = () => {
                   </div>
                 ))}
                 {(approvedQuery.data ?? []).length === 0 && (
-                  <p className="text-sm text-dimGray">No active GIFs yet.</p>
+                  <p className="text-sm text-dimGray">No active submissions yet.</p>
                 )}
               </div>
             </div>

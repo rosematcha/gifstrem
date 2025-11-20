@@ -21,7 +21,7 @@ const LandingPage = () => {
             <span className="text-violet">strem</span>
           </h1>
           <p className="mt-6 text-lg text-coolGray max-w-2xl mx-auto">
-            Turn your stream into a community bulletin board with crowd-sourced, moderated GIFs. Now in open alpha!
+            Turn your stream into a community bulletin board with crowd-sourced, moderated GIFs and still images. Now in open alpha!
           </p>
         </div>
         <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
