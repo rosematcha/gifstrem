@@ -260,11 +260,39 @@ function buildPockets(canvas: { width: number; height: number }, safeZones: Safe
   if (availableRects.length === 0) {
     availableRects = [baseRect];
   }
+
+  const edgeThickness = Math.max(110, Math.min(canvas.width, canvas.height) * 0.18);
+  const edgeBands = [
+    { name: 'edge-top', rect: { x: baseRect.x, y: baseRect.y, width: baseRect.width, height: edgeThickness } },
+    {
+      name: 'edge-bottom',
+      rect: { x: baseRect.x, y: baseRect.y + baseRect.height - edgeThickness, width: baseRect.width, height: edgeThickness },
+    },
+    { name: 'edge-left', rect: { x: baseRect.x, y: baseRect.y, width: edgeThickness, height: baseRect.height } },
+    {
+      name: 'edge-right',
+      rect: { x: baseRect.x + baseRect.width - edgeThickness, y: baseRect.y, width: edgeThickness, height: baseRect.height },
+    },
+  ]
+    .flatMap((band) => {
+      return paddedZones.reduce((bandRects, zone) => bandRects.flatMap((rect) => subtractRect(rect, zone)), [band.rect])
+        .map((rect, idx) => ({ name: `${band.name}-${idx}`, rect }));
+    })
+    .filter((band) => band.rect.width > 48 && band.rect.height > 48)
+    .map((band) =>
+      createPocket(
+        band.name,
+        band.rect,
+        Math.max(80, Math.min(band.rect.width, band.rect.height)),
+        1.25,
+      ),
+    );
+
   const pockets = availableRects
     .filter((rect) => rect.width > 32 && rect.height > 32)
     .map((rect, index) => {
       const area = rect.width * rect.height;
-      const priorityBase = Math.min(1.4, 0.9 + area / Math.max(1, canvas.width * canvas.height));
+      const priorityBase = Math.min(1.2, 0.85 + area / Math.max(1, canvas.width * canvas.height));
       return createPocket(
         `pocket-${index}`,
         rect,
@@ -272,7 +300,8 @@ function buildPockets(canvas: { width: number; height: number }, safeZones: Safe
         priorityBase,
       );
     })
-    .flatMap((pocket) => subdividePocket(pocket));
+    .flatMap((pocket) => subdividePocket(pocket))
+    .concat(edgeBands);
   if (pockets.length === 0) {
     return [
       createPocket(
@@ -677,7 +706,7 @@ function selectPocket(
       const pocketCenterY = pocket.rect.y + pocket.rect.height / 2;
       const angle = Math.atan2(pocketCenterY - canvasCenterY, pocketCenterX - canvasCenterX);
       const angleDiff = Math.abs(((angle - desiredAngle + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
-      const directionalBias = Math.cos(angleDiff) * 0.6;
+      const directionalBias = Math.cos(angleDiff) * 0.9;
       const nearestEdge = Math.min(
         pocketCenterX,
         canvas.width - pocketCenterX,
@@ -685,13 +714,13 @@ function selectPocket(
         canvas.height - pocketCenterY,
       );
       const edgeBias =
-        clamp(1 - nearestEdge / Math.max(1, Math.min(canvas.width, canvas.height) * 0.45), 0, 1) * 0.35;
+        clamp(1 - nearestEdge / Math.max(1, Math.min(canvas.width, canvas.height) * 0.5), 0, 1) * 0.55;
       const noise = randomFromHash(`${seed}-${pocket.name}-jitter`, -40, 40);
       const densityFactor = 1 - sampleDensity(density, pocket.rect);
       const score =
-        freeArea * pocket.priority * densityFactor * 0.65 +
-        freeArea * 0.35 +
-        freeArea * (directionalBias * 0.6 + edgeBias * 0.4) -
+        freeArea * pocket.priority * densityFactor * 0.45 +
+        freeArea * 0.15 +
+        freeArea * (directionalBias * 0.7 + edgeBias * 0.6) -
         usagePenalty -
         saturationPenalty * 80 +
         noise;
