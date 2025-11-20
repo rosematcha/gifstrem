@@ -578,7 +578,7 @@ function keepOutsideSafeZones(
   }
   let candidate = clampRect(rect, canvas);
   const paddedZones = safeZones.map((zone) => padSafeZone(zone, SAFE_ZONE_PADDING, canvas));
-  for (let attempt = 0; attempt < Math.max(1, paddedZones.length) * 2; attempt += 1) {
+  for (let attempt = 0; attempt < Math.max(6, paddedZones.length * 4); attempt += 1) {
     let moved = false;
     for (const zone of paddedZones) {
       const next = keepOutsideSingleZone(candidate, zone, canvas);
@@ -591,10 +591,51 @@ function keepOutsideSafeZones(
       return candidate;
     }
     if (!moved) {
+      const jitterX = randomFromHash(`${rect.x}-${attempt}-jx`, -SAFE_ZONE_PADDING, SAFE_ZONE_PADDING);
+      const jitterY = randomFromHash(`${rect.y}-${attempt}-jy`, -SAFE_ZONE_PADDING, SAFE_ZONE_PADDING);
+      candidate = clampRect({ x: candidate.x + jitterX, y: candidate.y + jitterY, size: candidate.size }, canvas);
       break;
     }
   }
-  return candidate;
+
+  if (!paddedZones.some((zone) => rectsOverlap(candidate, zone))) {
+    return candidate;
+  }
+
+  const shrunkSize = Math.max(48, candidate.size * 0.8);
+  const edgePad = SAFE_ZONE_PADDING;
+  const farFromZones = paddedZones.map((zone) => ({
+    x: zone.x + zone.width / 2,
+    y: zone.y + zone.height / 2,
+  }));
+  const edgeCandidates = [
+    { x: edgePad, y: edgePad },
+    { x: canvas.width - shrunkSize - edgePad, y: edgePad },
+    { x: edgePad, y: canvas.height - shrunkSize - edgePad },
+    { x: canvas.width - shrunkSize - edgePad, y: canvas.height - shrunkSize - edgePad },
+  ].concat(
+    farFromZones.map((center, idx) => ({
+      x: clamp(center.x < canvas.width / 2 ? canvas.width - shrunkSize - edgePad : edgePad, 0, canvas.width),
+      y: clamp(center.y < canvas.height / 2 ? canvas.height - shrunkSize - edgePad : edgePad, 0, canvas.height),
+      seed: idx,
+    })),
+  ];
+
+  let best = candidate;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const pos of edgeCandidates) {
+    const option = clampRect({ x: pos.x, y: pos.y, size: shrunkSize }, canvas);
+    const overlapScore = totalOverlapArea(option, paddedZones);
+    if (overlapScore === 0) {
+      return option;
+    }
+    if (overlapScore < bestScore) {
+      bestScore = overlapScore;
+      best = option;
+    }
+  }
+
+  return best;
 }
 
 function selectPocket(
@@ -845,6 +886,22 @@ function rectsOverlap(
   const widthA = typeof a.size === 'number' ? a.size : a.width ?? 0;
   const heightA = typeof a.size === 'number' ? a.size : a.height ?? 0;
   return a.x < b.x + b.width && a.x + widthA > b.x && a.y < b.y + b.height && a.y + heightA > b.y;
+}
+
+function overlapAreaWithZone(
+  rect: { x: number; y: number; size: number },
+  zone: { x: number; y: number; width: number; height: number },
+) {
+  const width = Math.max(0, Math.min(rect.x + rect.size, zone.x + zone.width) - Math.max(rect.x, zone.x));
+  const height = Math.max(0, Math.min(rect.y + rect.size, zone.y + zone.height) - Math.max(rect.y, zone.y));
+  return width * height;
+}
+
+function totalOverlapArea(
+  rect: { x: number; y: number; size: number },
+  zones: { x: number; y: number; width: number; height: number }[],
+) {
+  return zones.reduce((sum, zone) => sum + overlapAreaWithZone(rect, zone), 0);
 }
 
 export default OverlayPage;
