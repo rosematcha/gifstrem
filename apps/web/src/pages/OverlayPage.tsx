@@ -761,7 +761,8 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-const MAX_OVERLAP_RATIO = 0.01;
+const MAX_OVERLAP_RATIO = 0.005;
+const SPREAD_PADDING = 14;
 
 function resolveOverlaps(
   rect: { x: number; y: number; size: number },
@@ -775,6 +776,7 @@ function resolveOverlaps(
     return rect;
   }
 
+  const minSizeLimit = Math.max(rect.size * 0.72, 64);
   let size = rect.size;
   let bestCandidate = rect;
   let bestScore = Number.POSITIVE_INFINITY;
@@ -796,24 +798,24 @@ function resolveOverlaps(
         {
           x: rect.x + offset.dx,
           y: rect.y + offset.dy,
-        size,
-      },
-      canvas,
-    );
-    if (respectSafeZone) {
-      candidate = keepOutsideSafeZones(candidate, safeZones, canvas);
-    }
-    const score = overlapScore(candidate, existing);
-    if (score < bestScore) {
-      bestScore = score;
-      bestCandidate = candidate;
+          size,
+        },
+        canvas,
+      );
+      if (respectSafeZone) {
+        candidate = keepOutsideSafeZones(candidate, safeZones, canvas);
+      }
+      const score = overlapScore(candidate, existing);
+      if (score < bestScore || (score === bestScore && candidate.size > bestCandidate.size)) {
+        bestScore = score;
+        bestCandidate = candidate;
       }
       if (score <= MAX_OVERLAP_RATIO) {
         return candidate;
       }
     }
 
-    size = Math.max(56, size * 0.9);
+    size = Math.max(minSizeLimit, size * 0.9);
   }
 
   return findLowOverlapPlacement(bestCandidate, existing, safeZones, canvas, seed, respectSafeZone);
@@ -838,31 +840,36 @@ function overlapArea(
   a: { x: number; y: number; size: number },
   b: { x: number; y: number; size: number },
 ) {
-  const width = Math.max(
-    0,
-    Math.min(a.x + a.size, b.x + b.size) - Math.max(a.x, b.x),
-  );
-  const height = Math.max(
-    0,
-    Math.min(a.y + a.size, b.y + b.size) - Math.max(a.y, b.y),
-  );
+  const width = Math.max(0, Math.min(a.x + a.size, b.x + b.size) - Math.max(a.x, b.x));
+  const height = Math.max(0, Math.min(a.y + a.size, b.y + b.size) - Math.max(a.y, b.y));
   return width * height;
+}
+
+function inflateRect(rect: { x: number; y: number; size: number }, padding: number) {
+  return { x: rect.x - padding, y: rect.y - padding, size: rect.size + padding * 2 };
 }
 
 function overlapRatio(
   a: { x: number; y: number; size: number },
   b: { x: number; y: number; size: number },
+  padding = 0,
 ) {
-  const overlap = overlapArea(a, b);
+  const aRect = padding > 0 ? inflateRect(a, padding) : a;
+  const bRect = padding > 0 ? inflateRect(b, padding) : b;
+  const overlap = overlapArea(aRect, bRect);
   if (overlap === 0) return 0;
-  const areaA = a.size * a.size;
-  const areaB = b.size * b.size;
+  const areaA = aRect.size * aRect.size;
+  const areaB = bRect.size * bRect.size;
   return overlap / Math.min(areaA, areaB);
 }
 
-function overlapScore(candidate: { x: number; y: number; size: number }, existing: { x: number; y: number; size: number }[]) {
+function overlapScore(
+  candidate: { x: number; y: number; size: number },
+  existing: { x: number; y: number; size: number }[],
+  padding = SPREAD_PADDING,
+) {
   if (existing.length === 0) return 0;
-  return Math.max(...existing.map((placed) => overlapRatio(candidate, placed)));
+  return Math.max(...existing.map((placed) => overlapRatio(candidate, placed, padding)));
 }
 
 function findLowOverlapPlacement(
@@ -881,17 +888,19 @@ function findLowOverlapPlacement(
 
   const widthLimit = canvas.width - seedCandidate.size;
   const heightLimit = canvas.height - seedCandidate.size;
-  const gridCols = 6;
-  const gridRows = 4;
+  const gridCols = 8;
+  const gridRows = 6;
   const gridSpacingX = widthLimit / Math.max(1, gridCols - 1);
   const gridSpacingY = heightLimit / Math.max(1, gridRows - 1);
-  const gridSamples: { x: number; y: number }[] = [];
+  const gridSamples: { x: number; y: number; weight: number }[] = [];
   for (let gx = 0; gx < gridCols; gx += 1) {
     for (let gy = 0; gy < gridRows; gy += 1) {
-      gridSamples.push({ x: gx * gridSpacingX, y: gy * gridSpacingY });
+      const pos = { x: gx * gridSpacingX, y: gy * gridSpacingY };
+      const weight = randomFromHash(`${seed}-grid-${gx}-${gy}`, 0, 1);
+      gridSamples.push({ ...pos, weight });
     }
   }
-  for (const sample of gridSamples) {
+  for (const sample of gridSamples.sort((a, b) => a.weight - b.weight)) {
     let candidate = clampRect({ x: sample.x, y: sample.y, size: seedCandidate.size }, canvas);
     if (respectSafeZone) {
       candidate = keepOutsideSafeZones(candidate, safeZones, canvas);
@@ -906,7 +915,7 @@ function findLowOverlapPlacement(
     }
   }
 
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  for (let attempt = 0; attempt < 160; attempt += 1) {
     const offsetSeed = `${seed}-fallback-${attempt}`;
     const randomColumn = randomFromHash(`${offsetSeed}-x`, 0, widthLimit);
     const randomRow = randomFromHash(`${offsetSeed}-y`, 0, heightLimit);
