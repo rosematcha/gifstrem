@@ -32,7 +32,7 @@ type DensityMap = {
   values: number[];
 };
 
-const SAFE_ZONE_PADDING = 24;
+const SAFE_ZONE_PADDING = 32;
 const EMPTY_SAFE_ZONE = { x: 0, y: 0, width: 0, height: 0 } as const;
 const DENSITY_COLS = 4;
 const DENSITY_ROWS = 3;
@@ -109,25 +109,34 @@ const OverlayPage = () => {
     const pockets = buildPockets(canvasSize, effectiveSafeZones);
     const densityMap = createDensityMap(canvasSize);
     const shortestSide = Math.min(canvasSize.width, canvasSize.height);
-    const minStickerSize = Math.max(72, Math.round(shortestSide * 0.07));
-    const maxStickerSize = Math.min(240, Math.round(shortestSide * 0.26));
-    const baseSize = Math.min(Math.max(shortestSide / 4, minStickerSize * 1.25), maxStickerSize);
+    const minStickerSize = Math.max(56, Math.round(shortestSide * 0.05));
+    const maxStickerSize = Math.min(220, Math.round(shortestSide * 0.23));
+    const availableArea = Math.max(
+      1,
+      pockets.reduce((total, pocket) => total + pocket.rect.width * pocket.rect.height, 0),
+    );
+    const areaPerItem = availableArea / Math.max(1, query.data.submissions.length);
+    const adaptiveBase = Math.sqrt(areaPerItem) * 0.62;
+    const baseSize = clamp(Math.max(shortestSide * 0.12, adaptiveBase), minStickerSize, maxStickerSize);
     const placements: { x: number; y: number; size: number }[] = [];
     const items = query.data.submissions.map((submission, index) => {
       const seedKey = `${submission.id}-${index}`;
       const pocket = selectPocket(pockets, index, seedKey, densityMap);
-      const pocketCapacity = Math.max(48, Math.min(maxStickerSize, pocket.maxSize));
+      const pocketCapacity = Math.max(40, Math.min(maxStickerSize, pocket.maxSize * 0.95));
       const minForPocket = Math.min(minStickerSize, pocketCapacity);
-      const scale = randomFromHash(`${seedKey}-scale`, 0.72, 1.35);
-      const desiredSize = clamp(baseSize * scale, minForPocket, pocketCapacity);
-      const offsetXRange = Math.max(1, pocket.rect.width - desiredSize);
-      const offsetYRange = Math.max(1, pocket.rect.height - desiredSize);
-      const offsetX = randomFromHash(`${seedKey}-offset-x-${pocket.usage}`, 0, offsetXRange);
-      const offsetY = randomFromHash(`${seedKey}-offset-y-${pocket.usage}`, 0, offsetYRange);
+      const scale = randomFromHash(`${seedKey}-scale`, 0.78, 1.22);
+      const desiredSize = clamp(baseSize * scale, Math.max(44, minForPocket * 0.9), pocketCapacity);
+      const pocketPadding = Math.min(desiredSize * 0.18, 24);
+      const offsetXRange = Math.max(1, pocket.rect.width - desiredSize - pocketPadding * 2);
+      const offsetYRange = Math.max(1, pocket.rect.height - desiredSize - pocketPadding * 2);
+      const offsetX =
+        pocket.rect.x + pocketPadding + randomFromHash(`${seedKey}-offset-x-${pocket.usage}`, 0, offsetXRange);
+      const offsetY =
+        pocket.rect.y + pocketPadding + randomFromHash(`${seedKey}-offset-y-${pocket.usage}`, 0, offsetYRange);
       let rect = clampRect(
         {
-        x: pocket.rect.x + offsetX,
-        y: pocket.rect.y + offsetY,
+        x: offsetX,
+        y: offsetY,
         size: desiredSize,
         },
         canvasSize,
@@ -225,7 +234,7 @@ const OverlayPage = () => {
 };
 
 function buildPockets(canvas: { width: number; height: number }, safeZones: SafeZone[]): Pocket[] {
-  const margin = 24;
+  const margin = 28;
   const baseRect = {
     x: margin,
     y: margin,
@@ -417,12 +426,12 @@ function subdividePocket(pocket: Pocket) {
   const segments: Pocket[] = [];
   const aspectRatio = rect.width / Math.max(1, rect.height);
   const inverseAspectRatio = rect.height / Math.max(1, rect.width);
-  const maxSlices = 3;
-  const targetSize = 360;
+  const maxSlices = 4;
+  const targetSize = 260;
   const columns =
-    aspectRatio > 1.35 ? Math.min(maxSlices, Math.max(1, Math.round(rect.width / targetSize) || 1)) : 1;
+    aspectRatio > 1.2 ? Math.min(maxSlices, Math.max(1, Math.round(rect.width / targetSize) || 1)) : 1;
   const rows =
-    inverseAspectRatio > 1.35 ? Math.min(maxSlices, Math.max(1, Math.round(rect.height / targetSize) || 1)) : 1;
+    inverseAspectRatio > 1.2 ? Math.min(maxSlices, Math.max(1, Math.round(rect.height / targetSize) || 1)) : 1;
 
   if (columns === 1 && rows === 1) {
     return [pocket];
@@ -430,8 +439,8 @@ function subdividePocket(pocket: Pocket) {
 
   const sliceWidth = rect.width / columns;
   const sliceHeight = rect.height / rows;
-  const gapX = columns > 1 ? Math.min(18, sliceWidth * 0.2) : 0;
-  const gapY = rows > 1 ? Math.min(18, sliceHeight * 0.2) : 0;
+  const gapX = columns > 1 ? Math.min(22, sliceWidth * 0.18) : 0;
+  const gapY = rows > 1 ? Math.min(22, sliceHeight * 0.18) : 0;
 
   for (let row = 0; row < rows; row += 1) {
     for (let col = 0; col < columns; col += 1) {
@@ -606,10 +615,11 @@ function selectPocket(pockets: Pocket[], index: number, seed: string, density: D
     .map((pocket) => {
       const area = pocket.rect.width * pocket.rect.height;
       const freeArea = Math.max(1, area - pocket.usedArea);
-      const penalty = pocket.usage * pocket.maxSize * 25;
+      const usagePenalty = pocket.usage * pocket.maxSize * 120;
+      const saturationPenalty = pocket.usedArea / Math.max(1, area);
       const noise = randomFromHash(`${seed}-${pocket.name}-jitter`, -40, 40);
       const densityFactor = 1 - sampleDensity(density, pocket.rect);
-      const score = freeArea * pocket.priority * densityFactor - penalty + noise;
+      const score = freeArea * pocket.priority * densityFactor - usagePenalty - saturationPenalty * 120 + noise;
       return { pocket, score };
     })
     .sort((a, b) => b.score - a.score);
@@ -640,7 +650,7 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-const MAX_OVERLAP_RATIO = 0.08;
+const MAX_OVERLAP_RATIO = 0.03;
 
 function resolveOverlaps(
   rect: { x: number; y: number; size: number },
@@ -657,10 +667,10 @@ function resolveOverlaps(
   let size = rect.size;
   let bestCandidate = rect;
   let bestScore = Number.POSITIVE_INFINITY;
-  for (let shrink = 0; shrink < 4; shrink += 1) {
-    const shift = size * 0.45;
-    const offsets = [{ dx: 0, dy: 0 }];
-    const steps = 10;
+  for (let shrink = 0; shrink < 6; shrink += 1) {
+    const shift = size * (0.6 - shrink * 0.06);
+    const offsets = [{ dx: 0, dy: 0 }, { dx: shift, dy: 0 }, { dx: -shift, dy: 0 }, { dx: 0, dy: shift }, { dx: 0, dy: -shift }];
+    const steps = 14;
     for (let i = 0; i < steps; i += 1) {
       const angle =
         (i / steps) * Math.PI * 2 + randomFromHash(`${seed}-overlap-${rect.x}-${rect.y}-${shrink}-${i}`, 0, Math.PI / 6);
@@ -692,7 +702,7 @@ function resolveOverlaps(
       }
     }
 
-    size = Math.max(60, size * 0.88);
+    size = Math.max(44, size * 0.86);
   }
 
   return findLowOverlapPlacement(bestCandidate, existing, safeZones, canvas, seed, respectSafeZone);
@@ -754,7 +764,7 @@ function findLowOverlapPlacement(
 ) {
   let best = seedCandidate;
   let bestScore = overlapScore(seedCandidate, existing);
-  const attempts = 28;
+  const attempts = 42;
   if (bestScore <= MAX_OVERLAP_RATIO) {
     return seedCandidate;
   }
