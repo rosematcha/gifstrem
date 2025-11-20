@@ -119,9 +119,10 @@ const OverlayPage = () => {
     const adaptiveBase = Math.sqrt(areaPerItem) * 0.78;
     const baseSize = clamp(Math.max(shortestSide * 0.16, adaptiveBase), minStickerSize, maxStickerSize);
     const placements: { x: number; y: number; size: number }[] = [];
+    const canvasCenter = { x: canvasSize.width / 2, y: canvasSize.height / 2 };
     const items = query.data.submissions.map((submission, index) => {
       const seedKey = `${submission.id}-${index}`;
-      const pocket = selectPocket(pockets, index, seedKey, densityMap);
+      const pocket = selectPocket(pockets, index, seedKey, densityMap, canvasSize);
       const pocketCapacity = Math.max(60, Math.min(maxStickerSize, pocket.maxSize * 1.05));
       const minForPocket = Math.min(minStickerSize, pocketCapacity);
       const scale = randomFromHash(`${seedKey}-scale`, 0.88, 1.14);
@@ -596,7 +597,13 @@ function keepOutsideSafeZones(
   return candidate;
 }
 
-function selectPocket(pockets: Pocket[], index: number, seed: string, density: DensityMap) {
+function selectPocket(
+  pockets: Pocket[],
+  index: number,
+  seed: string,
+  density: DensityMap,
+  canvas: { width: number; height: number },
+) {
   if (pockets.length === 0) {
     return createPocket(
       'fallback',
@@ -611,15 +618,38 @@ function selectPocket(pockets: Pocket[], index: number, seed: string, density: D
     );
   }
 
+  const expectedUsage = Math.floor(index / Math.max(1, pockets.length));
+  const canvasCenterX = canvas.width / 2;
+  const canvasCenterY = canvas.height / 2;
+  const desiredAngle = ((index % pockets.length) / pockets.length) * Math.PI * 2;
+
   const scored = pockets
     .map((pocket) => {
       const area = pocket.rect.width * pocket.rect.height;
       const freeArea = Math.max(1, area - pocket.usedArea);
-      const usagePenalty = pocket.usage * Math.max(80, pocket.maxSize * 0.5);
+      const usageHeadroom = Math.max(0, pocket.usage - expectedUsage);
+      const usagePenalty = (pocket.usage * Math.max(60, pocket.maxSize * 0.4)) + usageHeadroom * 90;
       const saturationPenalty = pocket.usedArea / Math.max(1, area);
+      const pocketCenterX = pocket.rect.x + pocket.rect.width / 2;
+      const pocketCenterY = pocket.rect.y + pocket.rect.height / 2;
+      const angle = Math.atan2(pocketCenterY - canvasCenterY, pocketCenterX - canvasCenterX);
+      const angleDiff = Math.abs(((angle - desiredAngle + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+      const angleBias = Math.cos(angleDiff) * 0.25;
+      const nearestEdge = Math.min(
+        pocketCenterX,
+        canvas.width - pocketCenterX,
+        pocketCenterY,
+        canvas.height - pocketCenterY,
+      );
+      const edgeBias = clamp(1 - nearestEdge / Math.max(1, Math.min(canvas.width, canvas.height) * 0.42), 0, 1) * 0.2;
       const noise = randomFromHash(`${seed}-${pocket.name}-jitter`, -40, 40);
       const densityFactor = 1 - sampleDensity(density, pocket.rect);
-      const score = freeArea * pocket.priority * densityFactor - usagePenalty - saturationPenalty * 80 + noise;
+      const score =
+        freeArea * pocket.priority * densityFactor +
+        freeArea * (angleBias + edgeBias) -
+        usagePenalty -
+        saturationPenalty * 80 +
+        noise;
       return { pocket, score };
     })
     .sort((a, b) => b.score - a.score);
