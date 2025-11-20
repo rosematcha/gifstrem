@@ -621,32 +621,36 @@ function selectPocket(
   const expectedUsage = Math.floor(index / Math.max(1, pockets.length));
   const canvasCenterX = canvas.width / 2;
   const canvasCenterY = canvas.height / 2;
-  const desiredAngle = ((index % pockets.length) / pockets.length) * Math.PI * 2;
+  const directionAngles = [Math.PI, -Math.PI / 2, 0, Math.PI / 2]; // left, top, right, bottom
+  const desiredAngle = directionAngles[index % directionAngles.length];
 
   const scored = pockets
     .map((pocket) => {
       const area = pocket.rect.width * pocket.rect.height;
       const freeArea = Math.max(1, area - pocket.usedArea);
       const usageHeadroom = Math.max(0, pocket.usage - expectedUsage);
-      const usagePenalty = (pocket.usage * Math.max(60, pocket.maxSize * 0.4)) + usageHeadroom * 90;
+      const usagePenalty =
+        Math.pow(Math.max(0, pocket.usage), 1.15) * Math.max(70, pocket.maxSize * 0.25) + usageHeadroom * 110;
       const saturationPenalty = pocket.usedArea / Math.max(1, area);
       const pocketCenterX = pocket.rect.x + pocket.rect.width / 2;
       const pocketCenterY = pocket.rect.y + pocket.rect.height / 2;
       const angle = Math.atan2(pocketCenterY - canvasCenterY, pocketCenterX - canvasCenterX);
       const angleDiff = Math.abs(((angle - desiredAngle + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
-      const angleBias = Math.cos(angleDiff) * 0.25;
+      const directionalBias = Math.cos(angleDiff) * 0.6;
       const nearestEdge = Math.min(
         pocketCenterX,
         canvas.width - pocketCenterX,
         pocketCenterY,
         canvas.height - pocketCenterY,
       );
-      const edgeBias = clamp(1 - nearestEdge / Math.max(1, Math.min(canvas.width, canvas.height) * 0.42), 0, 1) * 0.2;
+      const edgeBias =
+        clamp(1 - nearestEdge / Math.max(1, Math.min(canvas.width, canvas.height) * 0.45), 0, 1) * 0.35;
       const noise = randomFromHash(`${seed}-${pocket.name}-jitter`, -40, 40);
       const densityFactor = 1 - sampleDensity(density, pocket.rect);
       const score =
-        freeArea * pocket.priority * densityFactor +
-        freeArea * (angleBias + edgeBias) -
+        freeArea * pocket.priority * densityFactor * 0.65 +
+        freeArea * 0.35 +
+        freeArea * (directionalBias * 0.6 + edgeBias * 0.4) -
         usagePenalty -
         saturationPenalty * 80 +
         noise;
