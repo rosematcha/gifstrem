@@ -109,24 +109,24 @@ const OverlayPage = () => {
     const pockets = buildPockets(canvasSize, effectiveSafeZones);
     const densityMap = createDensityMap(canvasSize);
     const shortestSide = Math.min(canvasSize.width, canvasSize.height);
-    const minStickerSize = Math.max(56, Math.round(shortestSide * 0.05));
-    const maxStickerSize = Math.min(220, Math.round(shortestSide * 0.23));
+    const minStickerSize = Math.max(68, Math.round(shortestSide * 0.08));
+    const maxStickerSize = Math.min(260, Math.round(shortestSide * 0.28));
     const availableArea = Math.max(
       1,
       pockets.reduce((total, pocket) => total + pocket.rect.width * pocket.rect.height, 0),
     );
-    const areaPerItem = availableArea / Math.max(1, query.data.submissions.length);
-    const adaptiveBase = Math.sqrt(areaPerItem) * 0.62;
-    const baseSize = clamp(Math.max(shortestSide * 0.12, adaptiveBase), minStickerSize, maxStickerSize);
+    const areaPerItem = availableArea / Math.max(1, query.data.submissions.length || 1);
+    const adaptiveBase = Math.sqrt(areaPerItem) * 0.78;
+    const baseSize = clamp(Math.max(shortestSide * 0.16, adaptiveBase), minStickerSize, maxStickerSize);
     const placements: { x: number; y: number; size: number }[] = [];
     const items = query.data.submissions.map((submission, index) => {
       const seedKey = `${submission.id}-${index}`;
       const pocket = selectPocket(pockets, index, seedKey, densityMap);
-      const pocketCapacity = Math.max(40, Math.min(maxStickerSize, pocket.maxSize * 0.95));
+      const pocketCapacity = Math.max(60, Math.min(maxStickerSize, pocket.maxSize * 1.05));
       const minForPocket = Math.min(minStickerSize, pocketCapacity);
-      const scale = randomFromHash(`${seedKey}-scale`, 0.78, 1.22);
-      const desiredSize = clamp(baseSize * scale, Math.max(44, minForPocket * 0.9), pocketCapacity);
-      const pocketPadding = Math.min(desiredSize * 0.18, 24);
+      const scale = randomFromHash(`${seedKey}-scale`, 0.88, 1.14);
+      const desiredSize = clamp(baseSize * scale, Math.max(52, minForPocket * 0.95), pocketCapacity);
+      const pocketPadding = Math.min(desiredSize * 0.12, 18);
       const offsetXRange = Math.max(1, pocket.rect.width - desiredSize - pocketPadding * 2);
       const offsetYRange = Math.max(1, pocket.rect.height - desiredSize - pocketPadding * 2);
       const offsetX =
@@ -615,11 +615,11 @@ function selectPocket(pockets: Pocket[], index: number, seed: string, density: D
     .map((pocket) => {
       const area = pocket.rect.width * pocket.rect.height;
       const freeArea = Math.max(1, area - pocket.usedArea);
-      const usagePenalty = pocket.usage * pocket.maxSize * 120;
+      const usagePenalty = pocket.usage * Math.max(80, pocket.maxSize * 0.5);
       const saturationPenalty = pocket.usedArea / Math.max(1, area);
       const noise = randomFromHash(`${seed}-${pocket.name}-jitter`, -40, 40);
       const densityFactor = 1 - sampleDensity(density, pocket.rect);
-      const score = freeArea * pocket.priority * densityFactor - usagePenalty - saturationPenalty * 120 + noise;
+      const score = freeArea * pocket.priority * densityFactor - usagePenalty - saturationPenalty * 80 + noise;
       return { pocket, score };
     })
     .sort((a, b) => b.score - a.score);
@@ -650,7 +650,7 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-const MAX_OVERLAP_RATIO = 0.03;
+const MAX_OVERLAP_RATIO = 0.05;
 
 function resolveOverlaps(
   rect: { x: number; y: number; size: number },
@@ -667,8 +667,8 @@ function resolveOverlaps(
   let size = rect.size;
   let bestCandidate = rect;
   let bestScore = Number.POSITIVE_INFINITY;
-  for (let shrink = 0; shrink < 6; shrink += 1) {
-    const shift = size * (0.6 - shrink * 0.06);
+  for (let shrink = 0; shrink < 4; shrink += 1) {
+    const shift = size * (0.58 - shrink * 0.05);
     const offsets = [{ dx: 0, dy: 0 }, { dx: shift, dy: 0 }, { dx: -shift, dy: 0 }, { dx: 0, dy: shift }, { dx: 0, dy: -shift }];
     const steps = 14;
     for (let i = 0; i < steps; i += 1) {
@@ -702,7 +702,7 @@ function resolveOverlaps(
       }
     }
 
-    size = Math.max(44, size * 0.86);
+    size = Math.max(56, size * 0.9);
   }
 
   return findLowOverlapPlacement(bestCandidate, existing, safeZones, canvas, seed, respectSafeZone);
