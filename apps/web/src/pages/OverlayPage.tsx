@@ -652,7 +652,7 @@ function keepOutsideSafeZones(
       y: clamp(center.y < canvas.height / 2 ? canvas.height - shrunkSize - edgePad : edgePad, 0, canvas.height),
       seed: idx,
     })),
-  ];
+  );
 
   let best = candidate;
   let bestScore = Number.POSITIVE_INFINITY;
